@@ -11,7 +11,7 @@ import {
   type OnboardingWizardState,
 } from "./schemas";
 
-const BACKEND_URL = "http://localhost:8000";
+import { BACKEND_URL } from "../config";
 const LOCAL_STORAGE_KEY = "visoora_onboarding_progress";
 
 const DEFAULT_STATE: OnboardingWizardState = {

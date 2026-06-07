@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
 import { Phone, Search, ArrowLeft, ArrowRight, Check, Loader2, AlertCircle, ShoppingBag, Globe, Share2 } from "lucide-react";
 import { useOnboardingStore } from "../store";
+import { BACKEND_URL } from "../../config";
 import { step2Schema, type Step2Data } from "../schemas";
 
 export default function Step2Page() {
@@ -47,7 +48,7 @@ export default function Step2Page() {
   const searchAvailableNumbers = async () => {
     setSearchingNumbers(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/provision/available-numbers?area_code=${areaCode}&country=${countryCode}`);
+      const res = await fetch(`${BACKEND_URL}/api/provision/available-numbers?area_code=${areaCode}&country=${countryCode}`);
       if (res.ok) {
         const data = await res.json();
         setAvailableNumbers(data.numbers || []);
@@ -97,7 +98,7 @@ export default function Step2Page() {
 
     if (activeTab === "buy") {
       try {
-        const response = await fetch("http://localhost:8000/api/provision/phone-number", {
+        const response = await fetch(`${BACKEND_URL}/api/provision/phone-number`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

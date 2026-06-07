@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { BACKEND_URL } from "../../config";
 import {
   CreditCard,
   Check,
@@ -80,14 +81,14 @@ export default function BillingPage() {
     try {
       setLoading(true);
       // Fetch Usage metrics
-      const usageRes = await fetch("http://localhost:8000/billing/usage", { headers: API_HEADERS });
+      const usageRes = await fetch(`${BACKEND_URL}/billing/usage`, { headers: API_HEADERS });
       if (usageRes.ok) {
         const usageData = await usageRes.json();
         setUsage(usageData);
       }
 
       // Fetch Invoice history
-      const historyRes = await fetch("http://localhost:8000/billing/history", { headers: API_HEADERS });
+      const historyRes = await fetch(`${BACKEND_URL}/billing/history`, { headers: API_HEADERS });
       if (historyRes.ok) {
         const historyData = await historyRes.json();
         setInvoices(historyData.invoices || []);
@@ -131,7 +132,7 @@ export default function BillingPage() {
     const targetState = !usage.auto_topup_enabled;
     
     try {
-      const res = await fetch("http://localhost:8000/billing/toggle-auto-topup", {
+      const res = await fetch(`${BACKEND_URL}/billing/toggle-auto-topup`, {
         method: "POST",
         headers: API_HEADERS,
         body: JSON.stringify({ enabled: targetState }),
@@ -166,7 +167,7 @@ export default function BillingPage() {
     setUpdatingPlan(targetPlan);
     
     try {
-      const res = await fetch("http://localhost:8000/billing/change-plan", {
+      const res = await fetch(`${BACKEND_URL}/billing/change-plan`, {
         method: "POST",
         headers: API_HEADERS,
         body: JSON.stringify({ plan: targetPlan }),

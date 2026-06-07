@@ -16,6 +16,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import Link from "next/link";
+import { BACKEND_URL } from "../../config";
 
 // ====================================================
 // MOCK DATA FOR CALL DETAIL
@@ -80,7 +81,7 @@ function AudioPlayer({ src }: { src: string }) {
     return `${m}:${s < 10 ? "0" : ""}${s}`;
   };
 
-  const absoluteSrc = src.startsWith("/recordings") ? `http://localhost:8000${src}` : src;
+  const absoluteSrc = src.startsWith("/recordings") ? `${BACKEND_URL}${src}` : src;
 
   return (
     <div

@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion, AnimatePresence } from "framer-motion";
 import { PhoneCall, Play, Pause, ArrowLeft, ArrowRight, Check, Loader2, AlertCircle, Bot, MessageSquare, ShieldCheck, HelpCircle } from "lucide-react";
 import { useOnboardingStore } from "../store";
+import { BACKEND_URL, getWsUrl } from "../../config";
 import { step6Schema, type Step6Data } from "../schemas";
 
 interface DialogueTurn {
@@ -85,7 +86,7 @@ export default function Step6Page() {
 
     try {
       // Trigger outbound test call request
-      const res = await fetch("http://localhost:8000/api/onboarding/trigger-test-call", {
+      const res = await fetch(`${BACKEND_URL}/api/onboarding/trigger-test-call`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -107,7 +108,7 @@ export default function Step6Page() {
   };
 
   const connectWebSocket = (cid: string) => {
-    const wsUrl = `ws://localhost:8000/api/onboarding/call-stream/${cid}`;
+    const wsUrl = getWsUrl(`/api/onboarding/call-stream/${cid}`);
     wsRef.current = new WebSocket(wsUrl);
 
     setCallState("active");

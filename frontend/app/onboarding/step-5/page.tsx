@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
 import { FileSpreadsheet, Upload, ArrowLeft, ArrowRight, Check, Loader2, AlertCircle, Database, Layers, LayoutGrid, CheckCircle } from "lucide-react";
 import { useOnboardingStore } from "../store";
+import { BACKEND_URL } from "../../config";
 import { step5Schema, type Step5Data } from "../schemas";
 
 interface CSVRow {
@@ -89,7 +90,7 @@ export default function Step5Page() {
         contacts: parsedData.length > 0 ? parsedData : mockParsedRows,
       };
 
-      const res = await fetch("http://localhost:8000/api/contacts/import", {
+      const res = await fetch(`${BACKEND_URL}/api/contacts/import`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -100,7 +101,7 @@ export default function Step5Page() {
       const jobId = job.job_id || "job_mock_" + Math.random().toString(36).substring(7);
 
       // Connect to Server-Sent Events progress stream
-      const eventSource = new EventSource(`http://localhost:8000/api/contacts/import/${jobId}`);
+      const eventSource = new EventSource(`${BACKEND_URL}/api/contacts/import/${jobId}`);
 
       eventSource.onmessage = (event) => {
         const update = JSON.parse(event.data);

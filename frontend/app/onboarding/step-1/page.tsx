@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { motion } from "framer-motion";
 import { Building2, Globe, ArrowRight, Loader2, AlertCircle } from "lucide-react";
 import { useOnboardingStore } from "../store";
+import { BACKEND_URL } from "../../config";
 import { step1Schema, type Step1Data } from "../schemas";
 
 export default function Step1Page() {
@@ -46,7 +47,7 @@ export default function Step1Page() {
     setValidationError(null);
 
     try {
-      const res = await fetch("http://localhost:8000/api/onboarding/validate-website", {
+      const res = await fetch(`${BACKEND_URL}/api/onboarding/validate-website`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ website: websiteVal }),

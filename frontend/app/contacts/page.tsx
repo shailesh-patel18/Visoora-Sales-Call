@@ -17,6 +17,7 @@ import {
   X,
 } from "lucide-react";
 import { useCRMStore, type Contact } from "../store";
+import { BACKEND_URL } from "../config";
 
 // ====================================================
 // MOCK DATA
@@ -134,7 +135,7 @@ export default function ContactsPage() {
     };
 
     try {
-      const res = await fetch("http://localhost:8000/api/v1/crm/contacts", {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
         method: "POST",
         headers: { 
           "Content-Type": "application/json",
@@ -176,7 +177,7 @@ export default function ContactsPage() {
 
   const fetchContacts = async () => {
     try {
-      const res = await fetch("http://localhost:8000/api/v1/crm/contacts", {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
         headers: { "X-Tenant-ID": "acme_tenant" }
       });
       if (res.ok) {
@@ -241,7 +242,7 @@ export default function ContactsPage() {
   const handleDial = async (contact: Contact) => {
     setDialing(contact.id);
     try {
-      await fetch("http://localhost:8000/make-call", {
+      await fetch(`${BACKEND_URL}/make-call`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
