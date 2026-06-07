@@ -1,0 +1,293 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: call-orchestrator
+  namespace: default
+  labels:
+    app: call-orchestrator
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: call-orchestrator
+  template:
+    metadata:
+      labels:
+        app: call-orchestrator
+    spec:
+      terminationGracePeriodSeconds: 310
+      containers:
+      - name: orchestrator
+        image: gcr.io/visoora-telephony/fastapi-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_URL
+          value: "redis://redis-service.default.svc.cluster.local:6379/0"
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SERVICE_TYPE
+          value: "orchestrator"
+        # Graceful shutdown handlers: Ingress drains connections on preStop sleep
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "1Gi"
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: call-orchestrator-service
+  namespace: default
+spec:
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: call-orchestrator
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audio-processor
+  namespace: default
+  labels:
+    app: audio-processor
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: audio-processor
+  template:
+    metadata:
+      labels:
+        app: audio-processor
+    spec:
+      terminationGracePeriodSeconds: 310
+      nodeSelector:
+        cloud.google.com/gke-nodepool: audio-optimized-pool
+      containers:
+      - name: processor
+        image: gcr.io/visoora-telephony/fastapi-backend:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        env:
+        - name: REDIS_URL
+          value: "redis://redis-service.default.svc.cluster.local:6379/0"
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SERVICE_TYPE
+          value: "audio-processor"
+        lifecycle:
+          preStop:
+            exec:
+              command: ["/bin/sh", "-c", "sleep 15"]
+        # Guaranteed QoS Class (requests == limits) to completely prevent CPU throttling/latency spikes
+        resources:
+          requests:
+            cpu: "2000m"
+            memory: "2Gi"
+          limits:
+            cpu: "2000m"
+            memory: "2Gi"
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8000
+          initialDelaySeconds: 15
+          periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audio-processor-service
+  namespace: default
+spec:
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+  selector:
+    app: audio-processor
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recording-worker
+  namespace: default
+  labels:
+    app: recording-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: recording-worker
+  template:
+    metadata:
+      labels:
+        app: recording-worker
+    spec:
+      containers:
+      - name: worker
+        image: gcr.io/visoora-telephony/fastapi-backend:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: REDIS_URL
+          value: "redis://redis-service.default.svc.cluster.local:6379/0"
+        - name: POD_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: SERVICE_TYPE
+          value: "worker"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-service
+  namespace: default
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7.0-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+
+---
+# ----------------------------------------------------
+# KEDA (Kubernetes Event-driven Autoscaling) Custom Scaler
+# ----------------------------------------------------
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: call-orchestrator-keda
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: call-orchestrator
+  minReplicaCount: 3
+  maxReplicaCount: 20
+  cooldownPeriod: 300
+  pollingInterval: 15
+  triggers:
+  # Scales dynamically based on the total active streams registry in Redis
+  - type: redis
+    metadata:
+      address: redis-service.default.svc.cluster.local:6379
+      db: "0"
+      key: "visoora:active_streams_count"
+      value: "25" # Add 1 replica for every 25 concurrent calls
+      activationValue: "1"
+
+---
+# ----------------------------------------------------
+# Nginx Sticky Ingress Resource Configuration
+# ----------------------------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: visoora-ingress
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Session Affinity (Sticky Cookies)
+    nginx.ingress.kubernetes.io/affinity: "cookie"
+    nginx.ingress.kubernetes.io/affinity-mode: "balanced"
+    nginx.ingress.kubernetes.io/session-cookie-name: "route"
+    nginx.ingress.kubernetes.io/session-cookie-expires: "172800"
+    nginx.ingress.kubernetes.io/session-cookie-max-age: "172800"
+spec:
+  rules:
+  - host: api.visoora.com
+    http:
+      paths:
+      - path: /media-stream
+        pathType: Prefix
+        backend:
+          service:
+            name: audio-processor-service
+            port:
+              number: 80
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: call-orchestrator-service
+            port:
+              number: 80

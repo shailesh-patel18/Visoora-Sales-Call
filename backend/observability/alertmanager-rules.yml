@@ -1,0 +1,124 @@
+# =============================================================================
+# Visoora Prometheus AlertManager Rules
+# =============================================================================
+# Deploy to Prometheus: --rules.file=/etc/prometheus/visoora_alerts.yml
+# =============================================================================
+
+groups:
+  - name: visoora_latency_alerts
+    rules:
+      # P95 LLM latency > 1200ms for 2 minutes → PagerDuty warning
+      - alert: HighLLMLatency
+        expr: histogram_quantile(0.95, sum(rate(visoora_llm_latency_histogram_bucket[5m])) by (le)) > 1200
+        for: 2m
+        labels:
+          severity: warning
+          team: ai-platform
+        annotations:
+          summary: "P95 LLM latency exceeds 1200ms"
+          description: >-
+            The 95th-percentile LLM inference latency has exceeded 1200ms for
+            over 2 minutes. Current P95: {{ $value | printf "%.0f" }}ms.
+            Check LLM provider health, model throughput, and token queue depth.
+          runbook_url: "https://runbook.visoora.io/high-llm-latency"
+          routing_key: "visoora-pagerduty-warning"
+
+  - name: visoora_capacity_alerts
+    rules:
+      # Active calls > 80% of pod capacity → PagerDuty warning
+      - alert: HighCallCapacity
+        expr: sum(visoora_active_calls_gauge) > 0.8 * (count(up{job="visoora-telephony"}) * 50)
+        for: 1m
+        labels:
+          severity: warning
+          team: infrastructure
+        annotations:
+          summary: "Active calls at >80% of pod capacity"
+          description: >-
+            Active call count ({{ $value | printf "%.0f" }}) exceeds 80% of
+            total cluster capacity. Scale the call-orchestrator deployment or
+            investigate stuck WebSocket sessions.
+          runbook_url: "https://runbook.visoora.io/high-call-capacity"
+          routing_key: "visoora-pagerduty-warning"
+
+  - name: visoora_compliance_alerts
+    rules:
+      # Compliance blocks spike > 10/min → PagerDuty CRITICAL
+      - alert: ComplianceBlockSpike
+        expr: sum(rate(visoora_compliance_blocks_counter[1m])) * 60 > 10
+        for: 1m
+        labels:
+          severity: critical
+          team: legal-compliance
+        annotations:
+          summary: "Compliance block rate exceeds 10/min"
+          description: >-
+            The compliance gate is blocking more than 10 calls per minute.
+            This may indicate a mass-dial campaign hitting DNC numbers or
+            calls outside permitted hours. Investigate immediately.
+          runbook_url: "https://runbook.visoora.io/compliance-block-spike"
+          routing_key: "visoora-pagerduty-critical"
+
+  - name: visoora_recording_alerts
+    rules:
+      # Recording upload failure rate > 5% → Slack alert
+      - alert: RecordingUploadFailures
+        expr: >-
+          (
+            sum(rate(visoora_recording_upload_total{status="failure"}[5m]))
+            /
+            clamp_min(sum(rate(visoora_recording_upload_total[5m])), 0.001)
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          team: storage
+          channel: slack-alerts
+        annotations:
+          summary: "Recording upload failure rate exceeds 5%"
+          description: >-
+            More than 5% of recording uploads are failing over the last 5
+            minutes. Check Supabase Storage availability, bucket permissions,
+            and disk space on recording-worker pods.
+          runbook_url: "https://runbook.visoora.io/recording-upload-failure"
+
+  - name: visoora_critical_log_alerts
+    rules:
+      # Any CRITICAL log line → Slack + email immediately
+      - alert: CriticalLogDetected
+        expr: >-
+          count_over_time({job="visoora-telephony"} |= "CRITICAL" [1m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          team: on-call
+          channel: slack-critical
+          notify: email
+        annotations:
+          summary: "CRITICAL log line detected in Visoora telephony service"
+          description: >-
+            A CRITICAL-level log was emitted by the visoora-telephony service.
+            This typically indicates a compliance block, boot failure, or
+            unrecoverable WebSocket error. Check Grafana Loki immediately.
+          runbook_url: "https://runbook.visoora.io/critical-log"
+
+  - name: visoora_connection_alerts
+    rules:
+      # Call connection failure rate > 0.5% → warning
+      - alert: CallConnectionFailures
+        expr: >-
+          (
+            sum(rate(visoora_call_connection_total{status="failure"}[5m]))
+            /
+            clamp_min(sum(rate(visoora_call_connection_total[5m])), 0.001)
+          ) > 0.005
+        for: 3m
+        labels:
+          severity: warning
+          team: telephony
+        annotations:
+          summary: "Call connection failure rate exceeds 0.5%"
+          description: >-
+            More than 0.5% of call connections are failing. Check Twilio
+            API health, webhook reachability, and WebSocket accept path.
+          runbook_url: "https://runbook.visoora.io/call-connection-failure"

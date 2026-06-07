@@ -1,0 +1,106 @@
+# =============================================================================
+# Visoora SLO Definitions — Sloth-compatible YAML
+# =============================================================================
+# https://sloth.dev/usage/slo/
+# =============================================================================
+
+version: "prometheus/v1"
+service: "visoora-telephony"
+
+slos:
+  # ─────────────────────────────────────────────────
+  # SLO 1: Call Connection Success Rate ≥ 99.5%
+  # ─────────────────────────────────────────────────
+  - name: "call-connection-success"
+    objective: 99.5
+    description: >-
+      Percentage of outbound and inbound call connection attempts that
+      successfully establish a WebSocket media stream session.
+    sli:
+      events:
+        error_query: sum(rate(visoora_call_connection_total{status="failure"}[{{.window}}]))
+        total_query: sum(rate(visoora_call_connection_total[{{.window}}]))
+    alerting:
+      name: CallConnectionSLOBreach
+      labels:
+        team: telephony
+      annotations:
+        runbook_url: "https://runbook.visoora.io/call-connection-failure"
+      page_alert:
+        labels:
+          severity: critical
+      ticket_alert:
+        labels:
+          severity: warning
+
+  # ─────────────────────────────────────────────────
+  # SLO 2: LLM P95 Latency ≤ 800ms
+  # ─────────────────────────────────────────────────
+  - name: "llm-p95-latency"
+    objective: 99.0
+    description: >-
+      99% of 5-minute windows must have P95 LLM inference latency
+      at or below 800ms. Breaches indicate model degradation or
+      provider throttling.
+    sli:
+      events:
+        error_query: >-
+          count_over_time(
+            (histogram_quantile(0.95, sum(rate(visoora_llm_latency_histogram_bucket[5m])) by (le)) > 800)[{{.window}}:5m]
+          )
+        total_query: >-
+          count_over_time(
+            (histogram_quantile(0.95, sum(rate(visoora_llm_latency_histogram_bucket[5m])) by (le)))[{{.window}}:5m]
+          )
+    alerting:
+      name: LLMLatencySLOBreach
+      labels:
+        team: ai-platform
+      annotations:
+        runbook_url: "https://runbook.visoora.io/high-llm-latency"
+      page_alert:
+        labels:
+          severity: critical
+      ticket_alert:
+        labels:
+          severity: warning
+
+  # ─────────────────────────────────────────────────
+  # SLO 3: Recording Upload Success ≥ 99.9%
+  # ─────────────────────────────────────────────────
+  - name: "recording-upload-success"
+    objective: 99.9
+    description: >-
+      Percentage of call recording uploads to Supabase Storage that
+      complete successfully. Failures risk compliance violations.
+    sli:
+      events:
+        error_query: sum(rate(visoora_recording_upload_total{status="failure"}[{{.window}}]))
+        total_query: sum(rate(visoora_recording_upload_total[{{.window}}]))
+    alerting:
+      name: RecordingUploadSLOBreach
+      labels:
+        team: storage
+      annotations:
+        runbook_url: "https://runbook.visoora.io/recording-upload-failure"
+      page_alert:
+        labels:
+          severity: critical
+      ticket_alert:
+        labels:
+          severity: warning
+
+
+# =============================================================================
+# Burn Rate Alert Windows
+# =============================================================================
+# Sloth auto-generates multi-window burn rate alerts based on these SLOs.
+# Manual burn rate rules below serve as documentation / fallback:
+#
+#   2% budget consumed in 1h  → 14.4x burn rate → page immediately
+#   5% budget consumed in 6h  → 6x burn rate    → page
+#  10% budget consumed in 3d  → 1x burn rate    → ticket
+#
+# These correspond to Google SRE "Multi-Window, Multi-Burn-Rate" alerting:
+#   https://sre.google/workbook/alerting-on-slos/
+# =============================================================================

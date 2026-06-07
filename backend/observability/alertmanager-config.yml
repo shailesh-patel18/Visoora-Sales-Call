@@ -1,0 +1,101 @@
+# =============================================================================
+# AlertManager Routing Configuration
+# =============================================================================
+# Maps severity/team labels to notification channels
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+  smtp_from: "alerts@visoora.io"
+  smtp_smarthost: "smtp.gmail.com:587"
+  smtp_auth_username: "alerts@visoora.io"
+  smtp_auth_password: "${SMTP_PASSWORD}"
+  smtp_require_tls: true
+
+route:
+  group_by: ["alertname", "severity"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  receiver: "default-slack"
+
+  routes:
+    # CRITICAL alerts → PagerDuty + Slack + Email
+    - match:
+        severity: critical
+      receiver: "pagerduty-critical"
+      continue: true
+
+    - match:
+        severity: critical
+        notify: email
+      receiver: "email-oncall"
+      continue: true
+
+    - match:
+        severity: critical
+      receiver: "slack-critical"
+
+    # WARNING alerts → PagerDuty warning
+    - match:
+        severity: warning
+      receiver: "pagerduty-warning"
+      continue: true
+
+    - match:
+        severity: warning
+        channel: slack-alerts
+      receiver: "slack-alerts"
+
+receivers:
+  - name: "default-slack"
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#visoora-alerts"
+        title: '{{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+  - name: "slack-critical"
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#visoora-critical"
+        title: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+  - name: "slack-alerts"
+    slack_configs:
+      - api_url: "${SLACK_WEBHOOK_URL}"
+        channel: "#visoora-alerts"
+        title: '⚠️ {{ .GroupLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Annotations.description }}{{ end }}'
+        send_resolved: true
+
+  - name: "pagerduty-critical"
+    pagerduty_configs:
+      - service_key: "${PAGERDUTY_SERVICE_KEY}"
+        severity: critical
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+        details:
+          firing: '{{ .Alerts.Firing | len }}'
+          description: '{{ .CommonAnnotations.description }}'
+          runbook: '{{ .CommonAnnotations.runbook_url }}'
+
+  - name: "pagerduty-warning"
+    pagerduty_configs:
+      - service_key: "${PAGERDUTY_SERVICE_KEY}"
+        severity: warning
+        description: '{{ .GroupLabels.alertname }}: {{ .CommonAnnotations.summary }}'
+
+  - name: "email-oncall"
+    email_configs:
+      - to: "oncall@visoora.io"
+        send_resolved: true
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    equal: ["alertname"]

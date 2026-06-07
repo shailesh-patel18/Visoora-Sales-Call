@@ -1,0 +1,38 @@
+# Promtail config — scrapes Docker container JSON logs → Loki
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker-containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: visoora-telephony
+          __path__: /var/lib/docker/containers/*/*.log
+    pipeline_stages:
+      # Parse Docker JSON log wrapper
+      - docker: {}
+      # Extract structlog JSON fields for Loki labels
+      - json:
+          expressions:
+            level: level
+            event: event
+            tenant_id: tenant_id
+            trace_id: trace_id
+            stream_sid: stream_sid
+      - labels:
+          level:
+          event:
+          tenant_id:
+      # Drop DEBUG logs in production to save storage
+      - match:
+          selector: '{level="debug"}'
+          action: drop

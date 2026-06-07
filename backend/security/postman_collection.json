@@ -1,0 +1,268 @@
+{
+  "info": {
+    "_postman_id": "c0e64b8d-56a9-46be-a4fa-589b21f3f619",
+    "name": "Visoora Sales Call Backend Security QA Suite",
+    "description": "Integration test endpoints covering Supabase JWT Authentication, RBAC Role restrictions, M2M API Key bypasses, Rate Limiting triggers, and Twilio Webhook X-Twilio-Signature validations.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check (Public - Unauthenticated)",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/health",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "health"
+          ]
+        },
+        "description": "Validates that public endpoints like /health bypass all authentication and rate-limiting filters."
+      },
+      "response": []
+    },
+    {
+      "name": "Get Campaign Leads - Valid Bearer Token (Agent/Admin)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{valid_agent_jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/api/campaigns",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "campaigns"
+          ]
+        },
+        "description": "Validates retrieval of leads list using a correct, unexpired Supabase JWT."
+      },
+      "response": []
+    },
+    {
+      "name": "Get Campaign Leads - Invalid Token (Unauthorized)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "invalid_or_expired_jwt_signature_here",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:8000/api/campaigns",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "campaigns"
+          ]
+        },
+        "description": "Validates that malformed or expired JWTs return an RFC 7807 401 Unauthorized Problem Details block."
+      },
+      "response": []
+    },
+    {
+      "name": "Dial Campaign Lead - Valid JWT (Agent Role)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{valid_agent_jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"lead_1\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8000/api/campaigns/dial",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "campaigns",
+            "dial"
+          ]
+        },
+        "description": "Validates dialing execution by a user assigned to the 'agent' role."
+      },
+      "response": []
+    },
+    {
+      "name": "Dial Campaign Lead - Unauthorized JWT (Viewer Role Forbidden)",
+      "request": {
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{valid_viewer_jwt}}",
+              "type": "string"
+            }
+          ]
+        },
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"lead_1\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "http://localhost:8000/api/campaigns/dial",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "campaigns",
+            "dial"
+          ]
+        },
+        "description": "Validates that a user assigned to the 'viewer' role is rejected with an RFC 7807 403 Forbidden payload when attempting writing operations."
+      },
+      "response": []
+    },
+    {
+      "name": "Get Campaigns - Machine-to-Machine API Key Bypass",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "X-API-Key",
+            "value": "key_system_prod_a189f3",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:8000/api/campaigns",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "api",
+            "campaigns"
+          ]
+        },
+        "description": "Validates API Key M2M authentication, bypassing JWT checks and granting admin privileges."
+      },
+      "response": []
+    },
+    {
+      "name": "Twilio Webhook Validation - Missing Signature Rejected",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            {
+              "key": "CallSid",
+              "value": "CA12345",
+              "type": "text"
+            },
+            {
+              "key": "From",
+              "value": "+15005550006",
+              "type": "text"
+            }
+          ]
+        },
+        "url": {
+          "raw": "http://localhost:8000/incoming-call",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "8000",
+          "path": [
+            "incoming-call"
+          ]
+        },
+        "description": "Validates that requests to Twilio webhooks without X-Twilio-Signature return an RFC 7807 unauthenticated 401 response."
+      },
+      "response": []
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "valid_agent_jwt",
+      "value": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ...",
+      "type": "string"
+    },
+    {
+      "key": "valid_viewer_jwt",
+      "value": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjEifQ...",
+      "type": "string"
+    }
+  ]
+}
