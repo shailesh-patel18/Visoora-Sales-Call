@@ -2,9 +2,12 @@ import os
 import json
 import datetime
 from typing import List, Dict, Any, Optional
+from html import escape
+from urllib.parse import urlencode, urlparse
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Response, Depends, Form
 import structlog
 from server.storage_manager import supabase_client
+from security.config import settings
 from security.twilio_auth import verify_twilio_signature
 from services.calendar import calendar_service
 from services.sms import sms_service
@@ -120,20 +123,29 @@ async def handle_inbound_call_webhook(
             logger.error("local_tenant_lookup_failed", error=str(e))
             
     # 2. Build secure Websocket URL
-    host = request.headers.get("host", "localhost:8000")
-    if "localhost" not in host and "127.0.0.1" not in host:
-        protocol = "wss"
+    configured = settings.server_public_domain.strip().rstrip("/")
+    if configured:
+        parsed = urlparse(configured if "://" in configured else f"https://{configured}")
+        base_host = parsed.netloc or parsed.path
+        protocol = "wss" if (parsed.scheme or "https") == "https" else "ws"
     else:
-        protocol = "wss" if request.headers.get("x-forwarded-proto") == "https" else "ws"
-        
-    ws_url = f"{protocol}://{host}/media-stream/inbound/{tenant_id}?caller_phone={From}&company={company_name}"
+        base_host = request.headers.get("x-forwarded-host") or request.headers.get("host", "localhost:8000")
+        if "localhost" not in base_host and "127.0.0.1" not in base_host:
+            protocol = "wss"
+        else:
+            protocol = "wss" if request.headers.get("x-forwarded-proto") == "https" else "ws"
+
+    query = urlencode({"caller_phone": From, "company": company_name})
+    ws_url = f"{protocol}://{base_host}/media-stream/inbound/{tenant_id}?{query}"
+    ws_url_xml = escape(ws_url, quote=True)
+    greeting_xml = escape(greeting)
     
     # Pause buffer ensures that Twilio doesn't tear down the call before WebSocket opens
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Say voice="Polly.Olivia">{greeting}</Say>
+    <Say voice="Polly.Olivia">{greeting_xml}</Say>
     <Connect>
-        <Stream url="{ws_url}" />
+        <Stream url="{ws_url_xml}" />
     </Connect>
     <Pause length="28800" />
 </Response>

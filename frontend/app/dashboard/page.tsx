@@ -12,6 +12,15 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Radio,
+  ShieldAlert,
+  Sparkles,
+  CheckCircle2,
+  Award,
+  ChevronDown,
+  ChevronUp,
+  Play,
+  Building2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   ComposedChart,
@@ -24,6 +33,10 @@ import {
   CartesianGrid,
 } from "recharts";
 import { useCRMStore, type LiveCall, type ActivityEvent } from "../store";
+import { useOnboardingStore } from "../onboarding/store";
+import Link from "next/link";
+import { BACKEND_URL, getWsUrl } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 // ====================================================
 // MOCK DATA GENERATORS (replaced by API in production)
@@ -137,15 +150,18 @@ function KPICard({
         >
           <Icon className="w-5 h-5" />
         </div>
-        <div className={`flex items-center gap-1 text-xs font-medium ${positive ? "text-emerald-400" : "text-red-400"}`}>
-          {positive ? <ArrowUpRight className="w-3 h-3" /> : <ArrowDownRight className="w-3 h-3" />}
+        <div className={`flex items-center gap-1 text-sm font-semibold ${positive ? "text-emerald-400" : "text-red-400"}`}>
+          {positive ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
           {Math.abs(change)}%
         </div>
       </div>
-      <p className="text-2xl font-bold tracking-tight" style={{ color: "hsl(var(--text-primary))" }}>
+      <p className="text-xs font-bold uppercase tracking-wider mb-1.5" style={{ color: "hsl(var(--text-secondary))" }}>
+        {title}
+      </p>
+      <p className="text-3xl font-extrabold tracking-tight" style={{ color: "hsl(var(--text-primary))" }}>
         {value}
       </p>
-      <p className="text-xs mt-1" style={{ color: "hsl(var(--text-muted))" }}>
+      <p className="text-sm mt-1.5" style={{ color: "hsl(var(--text-muted))" }}>
         {changeLabel}
       </p>
     </div>
@@ -156,18 +172,22 @@ function FSMBadge({ state }: { state: string }) {
   const colors: Record<string, string> = {
     INITIATION: "#f59e0b",
     GREETING: "#f59e0b",
+    DISCOVERY: "#06b6d4",
     INTENT_DETECTION: "#8b5cf6",
+    PITCH: "#3b82f6",
     QUALIFICATION: "#3b82f6",
     QUALIFY_LEAD: "#3b82f6",
     BOOKING: "#10b981",
     OBJECTION: "#ef4444",
     TRANSFER_TO_HUMAN: "#ec4899",
+    SUCCESS_COMPLETE: "#22c55e",
     COMPLETE: "#6b7280",
+    END_CALL_DISCONNECT: "#6b7280",
   };
   const color = colors[state] || "#6b7280";
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold tracking-wide uppercase"
+      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide uppercase"
       style={{ background: `${color}20`, color }}
     >
       <span className="w-1.5 h-1.5 rounded-full animate-pulse-live" style={{ background: color }} />
@@ -215,7 +235,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   if (!active || !payload) return null;
   return (
     <div
-      className="rounded-lg px-3 py-2 text-xs border shadow-xl"
+      className="rounded-lg px-3 py-2 text-sm border shadow-xl"
       style={{
         background: "hsl(var(--surface-2))",
         borderColor: "hsl(var(--border-subtle))",
@@ -236,37 +256,207 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
 // ====================================================
 export default function DashboardPage() {
   const { liveCalls, setLiveCalls, activities, setActivities } = useCRMStore();
+  const { state: onboardingState, loadProgress } = useOnboardingStore();
   const [trendData] = useState(generateTrendData);
   const [mounted, setMounted] = useState(false);
+  const [auditExpanded, setAuditExpanded] = useState(false);
 
+  // Real API and WebSocket state management
+  const [analytics, setAnalytics] = useState({
+    total_calls: 0,
+    total_duration_seconds: 0,
+    success_rate_percent: 0,
+    success_calls: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [wsStatus, setWsStatus] = useState<"connected" | "connecting" | "disconnected">("connecting");
+
+  // Fetch real REST data from backend analytics and logs endpoints
+  const fetchDashboardData = useCallback(async () => {
+    try {
+      setError(null);
+      
+      const analyticsRes = await fetch(`${BACKEND_URL}/api/analytics/dashboard`, {
+        headers: getAuthHeaders()
+      });
+      if (analyticsRes.ok) {
+        const data = await analyticsRes.json();
+        setAnalytics(data);
+      } else {
+        throw new Error(`Analytics API returned status ${analyticsRes.status}`);
+      }
+
+      const logsRes = await fetch(`${BACKEND_URL}/api/logs`, {
+        headers: getAuthHeaders()
+      });
+      if (logsRes.ok) {
+        const logs = await logsRes.json();
+        // Convert logs to activity events dynamically
+        const convertedActivities: ActivityEvent[] = logs.map((log: any, idx: number) => {
+          const durMins = Math.floor(log.duration_seconds / 60);
+          const durSecs = Math.round(log.duration_seconds % 60);
+          const durationStr = durMins > 0 ? `${durMins}m ${durSecs}s` : `${durSecs}s`;
+          return {
+            id: log.id || `log_${idx}`,
+            type: "call_completed" as const,
+            description: `Call completed with ${log.name || "Prospect"} at ${log.company || "Unknown"} (${durationStr})`,
+            timestamp: log.created_at || new Date().toISOString(),
+          };
+        });
+        setActivities(convertedActivities);
+      }
+    } catch (err: any) {
+      console.error("Dashboard fetch error:", err);
+      setError(err.message || "Failed to load dashboard data");
+      setActivities([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [setActivities]);
+
+  // Initial load
   useEffect(() => {
     setMounted(true);
-    setLiveCalls(generateMockLiveCalls());
-    setActivities(generateMockActivities());
-  }, [setLiveCalls, setActivities]);
+    fetchDashboardData();
+    loadProgress();
+  }, [fetchDashboardData, loadProgress]);
 
-  // Simulate live call polling every 2s
+  // Connect to live updates WebSocket (M2.3)
   useEffect(() => {
-    const interval = setInterval(() => {
-      setLiveCalls(
-        generateMockLiveCalls().map((c) => ({
-          ...c,
-          fsm_state: ["QUALIFICATION", "BOOKING", "OBJECTION", "GREETING", "INTENT_DETECTION"][
-            Math.floor(Math.random() * 5)
-          ],
-        }))
-      );
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [setLiveCalls]);
+    let ws: WebSocket | null = null;
+    let retryCount = 0;
+    let reconnectTimeout: NodeJS.Timeout;
 
-  if (!mounted) {
+    const connectWs = () => {
+      setWsStatus("connecting");
+      const wsUrl = getWsUrl("/api/live-ws");
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log("Live dashboard WebSocket connected.");
+        setWsStatus("connected");
+        retryCount = 0;
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          
+          if (data.event === "session_backfill") {
+            const activeCalls = data.turns && data.turns.length > 0 ? [{
+              stream_sid: data.stream_sid,
+              phone: "Active Call",
+              name: "Active Prospect",
+              company: "Unknown",
+              fsm_state: data.turns[data.turns.length - 1]?.state || "INITIATION",
+              direction: "outbound" as const,
+              started_at: data.turns[0]?.timestamp || new Date().toISOString(),
+            }] : [];
+            setLiveCalls(activeCalls);
+          } else if (data.event === "session_started") {
+            setLiveCalls((prev) => {
+              if (prev.some((c) => c.stream_sid === data.stream_sid)) return prev;
+              return [...prev, {
+                stream_sid: data.stream_sid,
+                phone: data.phone,
+                name: data.name,
+                company: data.company,
+                fsm_state: data.fsm_state,
+                direction: data.direction,
+                started_at: data.started_at,
+              }];
+            });
+          } else if (data.event === "live_transcript_turn") {
+            setLiveCalls((prev) =>
+              prev.map((c) =>
+                c.stream_sid === data.stream_sid
+                  ? { ...c, fsm_state: data.turn.state }
+                  : c
+              )
+            );
+          } else if (data.event === "session_completed") {
+            // Remove from live calls list
+            setLiveCalls((prev) => prev.filter((c) => c.stream_sid !== data.stream_sid));
+            // Prepends to activities feed
+            const dur = data.metrics?.stream_duration || 0;
+            const mins = Math.floor(dur / 60);
+            const secs = Math.round(dur % 60);
+            const durStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+            setActivities((prev) => [
+              {
+                id: `completed_${data.stream_sid}`,
+                type: "call_completed" as const,
+                description: `Call completed with prospect (${durStr})`,
+                timestamp: new Date().toISOString(),
+              },
+              ...prev,
+            ]);
+            // Refresh stats to include completed call
+            fetchDashboardData();
+          }
+        } catch (err) {
+          console.error("Error parsing live WS payload:", err);
+        }
+      };
+
+      ws.onclose = (event) => {
+        console.warn("Live dashboard WebSocket closed:", event);
+        setWsStatus("disconnected");
+        ws = null;
+
+        // Exponential back-off capped at 3 retries
+        if (retryCount < 3) {
+          const delay = Math.pow(2, retryCount) * 1000;
+          console.log(`Reconnecting live WS in ${delay}ms... (Attempt ${retryCount + 1}/3)`);
+          reconnectTimeout = setTimeout(() => {
+            retryCount++;
+            connectWs();
+          }, delay);
+        } else {
+          console.error("WebSocket connection lost permanently after 3 attempts.");
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+      };
+    };
+
+    connectWs();
+
+    return () => {
+      if (ws) {
+        ws.close();
+      }
+      clearTimeout(reconnectTimeout);
+    };
+  }, [setLiveCalls, setActivities, fetchDashboardData]);
+
+  if (!mounted || loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-t-transparent rounded-full animate-spin" style={{ borderColor: "hsl(var(--brand-primary))", borderTopColor: "transparent" }} />
+      <div className="flex items-center justify-center h-[500px]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-4 border-t-transparent rounded-full animate-spin" style={{ borderColor: "hsl(var(--brand-primary))", borderTopColor: "transparent" }} />
+          <p className="text-sm font-semibold animate-pulse" style={{ color: "hsl(var(--text-muted))" }}>Loading command center metrics...</p>
+        </div>
       </div>
     );
   }
+
+  // Calculate AI Readiness Score & Completeness
+  const profileComplete = !!(onboardingState.step3?.agentName && onboardingState.step3?.voice && onboardingState.step3?.timezone);
+  const productComplete = !!(onboardingState.step3?.productName && onboardingState.step3?.productPrice && onboardingState.step3?.productFeatures);
+  const playbookComplete = !!(onboardingState.step5?.playbookGreeting && onboardingState.step5?.playbookBookingLink);
+  const faqComplete = (onboardingState.step3?.kbFaqs?.length || 0) >= 2;
+  const objectionsComplete = (onboardingState.step3?.objectionsList?.length || 0) >= 2;
+
+  let score = 0;
+  if (profileComplete) score += 20;
+  if (productComplete) score += 25;
+  if (playbookComplete) score += 20;
+  if (faqComplete) score += 15;
+  if (objectionsComplete) score += 20;
 
   const totalCalls = trendData.reduce((s, d) => s + d.calls, 0);
   const totalMeetings = trendData.reduce((s, d) => s + d.meetings, 0);
@@ -277,27 +467,163 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight" style={{ color: "hsl(var(--text-primary))" }}>
+          <h1 className="text-3xl font-extrabold tracking-tight" style={{ color: "hsl(var(--text-primary))" }}>
             Command Center
           </h1>
-          <p className="text-sm mt-0.5" style={{ color: "hsl(var(--text-muted))" }}>
+          <p className="text-base mt-1" style={{ color: "hsl(var(--text-muted))" }}>
             Real-time overview of your AI sales operations
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium" style={{ background: "hsla(142, 71%, 45%, 0.1)", color: "hsl(var(--success))" }}>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium" style={{ background: "hsla(142, 71%, 45%, 0.1)", color: "hsl(var(--success))" }}>
             <span className="w-1.5 h-1.5 rounded-full animate-pulse-live" style={{ background: "hsl(var(--success))" }} />
             System Online
           </div>
         </div>
       </div>
 
+      {/* Pre-Flight AI Readiness Audit Widget */}
+      <div
+        className="rounded-xl border transition-all relative overflow-hidden"
+        style={{
+          background: "hsl(var(--surface-1))",
+          borderColor: score === 100 ? "hsla(142, 71%, 45%, 0.25)" : "hsla(38, 92%, 50%, 0.25)",
+        }}
+      >
+        <div className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div
+              className="w-10 h-10 rounded-lg flex items-center justify-center text-white"
+              style={{
+                background: score === 100 ? "hsla(142, 71%, 45%, 0.15)" : "hsla(38, 92%, 50%, 0.15)",
+                color: score === 100 ? "hsl(var(--success))" : "hsl(var(--warning))",
+              }}
+            >
+              <Sparkles className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold tracking-tight flex items-center gap-2" style={{ color: "hsl(var(--text-primary))" }}>
+                Pre-Flight AI Readiness Audit
+                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-white/10" style={{ color: score === 100 ? "hsl(var(--success))" : "hsl(var(--warning))" }}>
+                  {score}% Ready
+                </span>
+              </h3>
+              <p className="text-sm mt-1" style={{ color: "hsl(var(--text-muted))" }}>
+                {score === 100 
+                  ? "Your AI Employee is fully trained and ready for dial execution campaigns."
+                  : "AI training is currently incomplete. Review instructions before running dial operations."
+                }
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setAuditExpanded(!auditExpanded)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all"
+              style={{ borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+            >
+              {auditExpanded ? (
+                <>Collapse Audit <ChevronUp className="w-3.5 h-3.5" /></>
+              ) : (
+                <>Audit AI Knowledge <ChevronDown className="w-3.5 h-3.5" /></>
+              )}
+            </button>
+            <Link
+              href="/onboarding"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all bg-[hsl(var(--brand-primary))] hover:opacity-90"
+            >
+              <Play className="w-3.5 h-3.5" /> Launch Sandbox Test
+            </Link>
+          </div>
+        </div>
+
+        {/* Audit Details Panel (Expandable) */}
+        {auditExpanded && (
+          <div className="border-t p-5 grid grid-cols-1 md:grid-cols-5 gap-6" style={{ borderColor: "hsl(var(--border-subtle))", background: "rgba(255,255,255,0.01)" }}>
+            
+            {/* 1. Who is calling */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">1. Who is calling?</span>
+              <div className="p-3.5 rounded-lg border text-sm flex flex-col gap-1.5" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}>
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white">{onboardingState.step3?.agentName || "Alex"}</span>
+                  <span className="text-[10px] uppercase font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">Profile</span>
+                </div>
+                <p className="text-xs text-neutral-300 mt-1">Voice: {onboardingState.step3?.voice || " Rachel"}</p>
+                <p className="text-xs text-neutral-300">Tone: {onboardingState.step3?.tone || " consultative"}</p>
+                <p className="text-xs text-neutral-300 font-mono">Hours: {onboardingState.step3?.callingHoursStart || "08:00"}-{onboardingState.step3?.callingHoursEnd || "17:00"}</p>
+                <Link href="/agents" className="text-xs text-[hsl(var(--brand-accent))] font-bold mt-2 hover:underline">Edit Agent ➔</Link>
+              </div>
+            </div>
+
+            {/* 2. What it is selling */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">2. What is it selling?</span>
+              <div className="p-3.5 rounded-lg border text-sm flex flex-col gap-1.5" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}>
+                <span className="font-semibold text-white truncate">{onboardingState.step3?.productName || "No Product"}</span>
+                <p className="text-xs text-neutral-300 mt-1">Price: {onboardingState.step3?.productPrice || " N/A"}</p>
+                <p className="text-xs text-neutral-300 line-clamp-2">Features: {onboardingState.step3?.productFeatures || "None"}</p>
+                <Link href="/agents" className="text-xs text-[hsl(var(--brand-accent))] font-bold mt-2 hover:underline">Edit Product ➔</Link>
+              </div>
+            </div>
+
+            {/* 3. What it knows */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">3. What does it know?</span>
+              <div className="p-3.5 rounded-lg border text-sm flex flex-col gap-1.5" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}>
+                <span className="font-semibold text-white">Wiki & FAQ grounded</span>
+                <p className="text-xs text-neutral-300 mt-1">FAQs loaded: {onboardingState.step3?.kbFaqs?.length || 0}</p>
+                <p className="text-xs text-neutral-300 line-clamp-2">Wiki: {onboardingState.step3?.kbDescription || "None"}</p>
+                <Link href="/knowledge" className="text-xs text-[hsl(var(--brand-accent))] font-bold mt-2 hover:underline">Edit Wiki & FAQs ➔</Link>
+              </div>
+            </div>
+
+            {/* 4. How it handles resistance */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">4. How it handles resistance?</span>
+              <div className="p-3.5 rounded-lg border text-sm flex flex-col gap-1.5" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}>
+                <span className="font-semibold text-white">Objection Matrix</span>
+                <p className="text-xs text-neutral-300 mt-1">Rebuttals Mapped: {onboardingState.step3?.objectionsList?.length || 0}</p>
+                <p className="text-xs text-neutral-300">Stumped Queue: 3 items</p>
+                <Link href="/objections" className="text-xs text-[hsl(var(--brand-accent))] font-bold mt-2 hover:underline">Edit Rebuttals ➔</Link>
+              </div>
+            </div>
+
+            {/* 5. Playbook goal */}
+            <div className="flex flex-col gap-2">
+              <span className="text-xs font-bold uppercase tracking-wider text-neutral-400">5. Campaign Playbook Goal</span>
+              <div className="p-3.5 rounded-lg border text-sm flex flex-col gap-1.5" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}>
+                <span className="font-semibold text-white truncate">{onboardingState.step5?.campaignGoal || "None"}</span>
+                <p className="text-xs text-neutral-300 mt-1">Schedule Link: {onboardingState.step5?.playbookBookingLink ? "Configured" : "Missing"}</p>
+                <p className="text-xs text-neutral-300 line-clamp-2">Opening script hook configured.</p>
+                <Link href="/playbooks" className="text-xs text-[hsl(var(--brand-accent))] font-bold mt-2 hover:underline">Edit Playbook ➔</Link>
+              </div>
+            </div>
+
+          </div>
+        )}
+      </div>
+
+
+      {/* Error Alert Banner */}
+      {error && (
+        <div className="flex items-center gap-3 p-4 rounded-xl border" style={{ background: "hsla(347, 87%, 60%, 0.08)", borderColor: "hsla(347, 87%, 60%, 0.25)" }}>
+          <AlertTriangle className="w-5 h-5 flex-shrink-0" style={{ color: "hsl(var(--destructive))" }} />
+          <div className="flex-1 text-sm font-semibold" style={{ color: "hsl(var(--destructive))" }}>
+            Server Connection Error: {error}
+          </div>
+          <button onClick={fetchDashboardData} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-neutral-800 hover:bg-neutral-700 transition-colors">
+            Retry Connection
+          </button>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard title="Calls Today" value="47" change={12} changeLabel="vs yesterday" icon={PhoneCall} accentColor="#3b82f6" />
-        <KPICard title="Connection Rate" value={`${connectionRate}%`} change={3} changeLabel="vs last week" icon={TrendingUp} accentColor="#10b981" />
-        <KPICard title="Meetings Booked" value="8" change={-5} changeLabel="vs yesterday" icon={CalendarCheck} accentColor="#8b5cf6" />
-        <KPICard title="Pipeline Added" value="$24.5K" change={18} changeLabel="this week" icon={DollarSign} accentColor="#f59e0b" />
+        <KPICard title="Calls Today" value={analytics.total_calls.toString()} change={12} changeLabel="vs yesterday" icon={PhoneCall} accentColor="#3b82f6" />
+        <KPICard title="Connection Rate" value={`${analytics.success_rate_percent}%`} change={3} changeLabel="vs last week" icon={TrendingUp} accentColor="#10b981" />
+        <KPICard title="Meetings Booked" value={analytics.success_calls.toString()} change={-5} changeLabel="vs yesterday" icon={CalendarCheck} accentColor="#8b5cf6" />
+        <KPICard title="Pipeline Added" value={`$${((analytics.success_calls * 3500) / 1000).toFixed(1)}K`} change={18} changeLabel="this week" icon={DollarSign} accentColor="#f59e0b" />
       </div>
 
       {/* Main Grid */}
@@ -308,7 +634,7 @@ export default function DashboardPage() {
           style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}
         >
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold" style={{ color: "hsl(var(--text-primary))" }}>
+            <h2 className="text-base font-bold" style={{ color: "hsl(var(--text-primary))" }}>
               Calls & Meetings — Last 30 Days
             </h2>
           </div>
@@ -349,20 +675,23 @@ export default function DashboardPage() {
           style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}
         >
           <div className="flex items-center gap-2 mb-4">
-            <Radio className="w-4 h-4 text-red-400 animate-pulse-live" />
-            <h2 className="text-sm font-semibold" style={{ color: "hsl(var(--text-primary))" }}>
+            <Radio className={`w-4 h-4 ${wsStatus === "connected" && liveCalls.length > 0 ? "text-red-400 animate-pulse-live" : "text-neutral-500"}`} />
+            <h2 className="text-base font-bold" style={{ color: "hsl(var(--text-primary))" }}>
               Live Calls
             </h2>
             <span
-              className="ml-auto text-[11px] font-bold px-2 py-0.5 rounded-full"
-              style={{ background: "hsla(0, 84%, 60%, 0.15)", color: "#ef4444" }}
+              className="ml-auto text-xs font-bold px-2 py-0.5 rounded-full"
+              style={{
+                background: wsStatus === "connected" ? "hsla(142, 71%, 45%, 0.15)" : "hsla(38, 92%, 50%, 0.15)",
+                color: wsStatus === "connected" ? "hsl(var(--success))" : "hsl(var(--warning))"
+              }}
             >
-              {liveCalls.length} active
+              {wsStatus === "connected" ? `${liveCalls.length} active` : wsStatus === "connecting" ? "Reconnecting..." : "Connection Lost"}
             </span>
           </div>
           <div className="space-y-3">
             {liveCalls.length === 0 && (
-              <p className="text-xs py-8 text-center" style={{ color: "hsl(var(--text-muted))" }}>
+              <p className="text-sm py-8 text-center" style={{ color: "hsl(var(--text-muted))" }}>
                 No active calls right now
               </p>
             )}
@@ -373,11 +702,11 @@ export default function DashboardPage() {
                 style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-[13px] font-medium" style={{ color: "hsl(var(--text-primary))" }}>
+                  <span className="text-sm font-semibold" style={{ color: "hsl(var(--text-primary))" }}>
                     {call.name}
                   </span>
                   <span
-                    className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase"
+                    className="text-[11px] px-1.5 py-0.5 rounded font-semibold uppercase"
                     style={{
                       background: call.direction === "inbound" ? "hsla(168, 85%, 57%, 0.1)" : "hsla(262, 83%, 68%, 0.1)",
                       color: call.direction === "inbound" ? "hsl(var(--brand-primary))" : "hsl(var(--brand-accent))",
@@ -386,12 +715,12 @@ export default function DashboardPage() {
                     {call.direction}
                   </span>
                 </div>
-                <p className="text-[11px] mb-2" style={{ color: "hsl(var(--text-muted))" }}>
+                <p className="text-xs mb-2" style={{ color: "hsl(var(--text-muted))" }}>
                   {call.company} · {call.phone}
                 </p>
                 <div className="flex items-center justify-between">
                   <FSMBadge state={call.fsm_state} />
-                  <span className="text-[10px] flex items-center gap-1" style={{ color: "hsl(var(--text-muted))" }}>
+                  <span className="text-xs flex items-center gap-1" style={{ color: "hsl(var(--text-muted))" }}>
                     <Clock className="w-3 h-3" />
                     {relativeTime(call.started_at)}
                   </span>
@@ -407,7 +736,7 @@ export default function DashboardPage() {
         className="rounded-xl border p-5"
         style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}
       >
-        <h2 className="text-sm font-semibold mb-4" style={{ color: "hsl(var(--text-primary))" }}>
+        <h2 className="text-base font-bold mb-4" style={{ color: "hsl(var(--text-primary))" }}>
           Activity Feed
         </h2>
         <div className="space-y-1 max-h-[400px] overflow-y-auto">
@@ -425,11 +754,11 @@ export default function DashboardPage() {
                   {activityIcon(event.type)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-[13px] leading-relaxed" style={{ color: "hsl(var(--text-primary))" }}>
+                  <p className="text-sm leading-relaxed" style={{ color: "hsl(var(--text-primary))" }}>
                     {event.description}
                   </p>
                 </div>
-                <span className="text-[11px] flex-shrink-0" style={{ color: "hsl(var(--text-muted))" }}>
+                <span className="text-xs flex-shrink-0" style={{ color: "hsl(var(--text-muted))" }}>
                   {relativeTime(event.timestamp)}
                 </span>
               </div>

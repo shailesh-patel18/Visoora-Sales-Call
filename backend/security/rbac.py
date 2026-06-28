@@ -1,4 +1,5 @@
 import os
+import socket
 from fastapi import Depends, Request, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer, APIKeyHeader
 from pydantic import BaseModel, Field
@@ -94,11 +95,17 @@ async def get_current_user(
         )
         
     else:
-        # DEVELOPMENT FALLBACK: If request host is localhost/127.0.0.1 or the ngrok tunnel domain,
-        # fallback to a default admin UserPrincipal to enable smooth sandbox testing.
+        # DEVELOPMENT FALLBACK ONLY:
+        # Grants a local developer admin principal EXCLUSIVELY when:
+        #   1. APP_ENV is explicitly set to "development" (not staging, not production)
+        #   2. AND the request originates from localhost or 127.0.0.1
+        # The ngrok public domain is intentionally excluded — tunneling through ngrok
+        # from a remote host must always present real credentials.
         host = request.headers.get("host", "")
-        public_domain = os.getenv("SERVER_PUBLIC_DOMAIN", "").strip()
-        if "localhost" in host or "127.0.0.1" in host or (public_domain and public_domain in host):
+        is_local_host = "localhost" in host or "127.0.0.1" in host
+        is_dev_env = settings.app_env == "development"
+
+        if is_dev_env and is_local_host:
             user_principal = UserPrincipal(
                 user_id="local_dev_user",
                 email="developer@visoora.local",
@@ -106,9 +113,18 @@ async def get_current_user(
                 tenant_id="default_shared_tenant",
                 is_m2m=False
             )
-            logger.info("local_dev_auth_fallback", message="No credentials provided. Falling back to local developer principal for localhost/ngrok request.")
+            logger.info(
+                "local_dev_auth_fallback",
+                message="No credentials provided. Falling back to local developer principal (APP_ENV=development, localhost only)."
+            )
         else:
-            logger.warn("credentials_missing", message="No valid authorization token or API key provided.")
+            # Non-dev environment OR request from a non-localhost host — always require credentials.
+            logger.warn(
+                "credentials_missing",
+                message="No valid authorization token or API key provided.",
+                app_env=settings.app_env,
+                host=host
+            )
             raise AuthenticationException("Authentication required. Please provide a Bearer JWT or API Key.")
 
     # Bind active Tenant ID to thread context variables dynamically

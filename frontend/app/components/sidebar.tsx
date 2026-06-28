@@ -13,11 +13,25 @@ import {
   ChevronRight,
   Zap,
   CreditCard,
+  Bot,
+  BookOpen,
+  FolderOpen,
+  ShieldAlert,
+  Target,
+  Radio,
+  LogOut,
 } from "lucide-react";
 import { useCRMStore } from "../store";
+import { useAuthStore } from "../auth/store";
+import { useRouter } from "next/navigation";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/agents", label: "AI Employees", icon: Bot },
+  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+  { href: "/knowledge", label: "Knowledge Base", icon: FolderOpen },
+  { href: "/objections", label: "Objection Center", icon: ShieldAlert },
+  { href: "/campaigns", label: "Campaigns", icon: Target },
   { href: "/contacts", label: "Contacts", icon: Users },
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/calls", label: "Calls", icon: Phone },
@@ -27,7 +41,20 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname();
-  const { sidebarCollapsed, toggleSidebar } = useCRMStore();
+  const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useCRMStore();
+  const { user, logout } = useAuthStore();
+  const router = useRouter();
+
+  // Automatically close mobile sidebar drawer upon page routing navigation
+  React.useEffect(() => {
+    setMobileSidebarOpen(false);
+  }, [pathname, setMobileSidebarOpen]);
+
+  const handleLogout = () => {
+    logout();
+    router.push("/");
+    router.refresh();
+  };
 
   if (pathname === "/onboarding" || pathname?.startsWith("/onboarding/")) {
     return null;
@@ -35,9 +62,11 @@ export function Sidebar() {
 
   return (
     <aside
-      className={`relative flex flex-col border-r transition-all duration-300 ease-in-out ${
-        sidebarCollapsed ? "w-[68px]" : "w-[240px]"
-      }`}
+      className={`fixed inset-y-0 left-0 z-50 flex flex-col border-r transition-all duration-300 ease-in-out md:relative ${
+        mobileSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+      } ${
+        sidebarCollapsed ? "md:w-[68px]" : "md:w-[240px]"
+      } w-[240px]`}
       style={{
         background: "hsl(var(--surface-1))",
         borderColor: "hsl(var(--border-subtle))",
@@ -68,7 +97,7 @@ export function Sidebar() {
             <Link
               key={item.href}
               href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all ${
+              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
                 isActive
                   ? "text-white"
                   : ""
@@ -86,10 +115,62 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Collapse toggle */}
+      {/* User profile & Logout */}
+      <div className="p-3 border-t mt-auto" style={{ borderColor: "hsl(var(--border-subtle))" }}>
+        {sidebarCollapsed ? (
+          <div className="flex flex-col items-center gap-3 py-2">
+            <div 
+              className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white uppercase shadow-inner"
+              style={{
+                background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))"
+              }}
+              title={user?.name || "User"}
+            >
+              {(user?.name || "U").charAt(0)}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1.5 rounded-md text-[hsl(var(--text-secondary))] hover:text-white hover:bg-[hsl(var(--surface-3))]"
+              title="Sign Out"
+            >
+              <LogOut className="w-4.5 h-4.5" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 py-1">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div 
+                className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white uppercase flex-shrink-0 shadow-inner"
+                style={{
+                  background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))"
+                }}
+              >
+                {(user?.name || "U").charAt(0)}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-white truncate">
+                  {user?.name || "Admin User"}
+                </p>
+                <p className="text-xs text-[hsl(var(--text-muted))] truncate">
+                  {user?.email || "admin@visoora.com"}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="p-1.5 rounded-md text-[hsl(var(--text-secondary))] hover:text-white hover:bg-[hsl(var(--surface-3))] flex-shrink-0"
+              title="Sign Out"
+            >
+              <LogOut className="w-4.5 h-4.5" />
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Collapse toggle - Desktop only */}
       <button
         onClick={toggleSidebar}
-        className="absolute -right-3 top-20 w-6 h-6 rounded-full flex items-center justify-center border transition-colors"
+        className="absolute -right-3 top-20 w-6 h-6 rounded-full items-center justify-center border transition-colors hidden md:flex"
         style={{
           background: "hsl(var(--surface-2))",
           borderColor: "hsl(var(--border-default))",

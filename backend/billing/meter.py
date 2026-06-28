@@ -1,5 +1,6 @@
 import os
 import json
+import uuid
 import asyncio
 import datetime
 from typing import Dict, Any, Optional, Tuple
@@ -66,12 +67,13 @@ async def get_tenant_billing_info(tenant_id: str) -> Dict[str, Any]:
     # Local JSON fallback lookup
     async with local_db_lock:
         try:
-            if os.path.exists(LOCAL_TENANTS_FILE):
-                with open(LOCAL_TENANTS_FILE, "r") as f:
-                    tenants = json.load(f)
-                for t in tenants:
-                    if t.get("id") == tenant_id:
-                        return {**default_info, **t}
+            with open(LOCAL_TENANTS_FILE, "r") as f:
+                tenants = json.load(f)
+            for t in tenants:
+                if t.get("id") == tenant_id:
+                    return {**default_info, **t}
+        except FileNotFoundError:
+            pass
         except Exception as e:
             logger.error("local_tenants_read_failed", error=str(e))
 
@@ -185,7 +187,7 @@ async def increment_used_minutes(tenant_id: str, minutes_to_add: float):
             records = json.load(f)
             
         records.append({
-            "id": str(uuid_uuid4() if "uuid_uuid4" in globals() else uuid_fallback()),
+            "id": str(uuid.uuid4()),
             "tenant_id": tenant_id,
             "month": month_str,
             "duration_minutes": minutes_to_add,
@@ -210,9 +212,6 @@ async def increment_used_minutes(tenant_id: str, minutes_to_add: float):
     # 5. Check hourly spike abuse rules
     await _check_usage_spike(tenant_id, minutes_to_add)
 
-def uuid_fallback() -> str:
-    import uuid
-    return str(uuid.uuid4())
 
 # ----------------------------------------------------
 # 3. LIMIT ENFORCER & COMPLIANCE WEBHOOK BLOCKED

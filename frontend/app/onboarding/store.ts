@@ -103,9 +103,37 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
           tenant_id: "default_shared_tenant", // Multi-tenant sandbox fallback
           company_name: get().state.step1?.companyName || "Unknown",
           website: get().state.step1?.website || "",
+          industry: get().state.step1?.industry || "",
+          team_size: get().state.step1?.teamSize || "",
+          annual_revenue: get().state.step1?.annualRevenue || "",
+          target_region: get().state.step1?.targetRegion || "",
+          
           phone_number: get().state.step2?.twilioNumber || get().state.step2?.portedNumber || "",
+          
           agent_name: get().state.step3?.agentName || "Alex",
+          company_description: get().state.step3?.companyDescription || "",
+          value_proposition: get().state.step3?.valueProposition || "",
+          voice: get().state.step3?.voice || "rachel",
+          tone: get().state.step3?.tone || "consultative",
+          timezone: get().state.step3?.timezone || "America/New_York",
+          calling_hours_start: get().state.step3?.callingHoursStart || "08:00",
+          calling_hours_end: get().state.step3?.callingHoursEnd || "17:00",
+          product_name: get().state.step3?.productName || "",
+          product_price: get().state.step3?.productPrice || "",
+          product_features: get().state.step3?.productFeatures || "",
+          target_audience: get().state.step3?.targetAudience || "",
+          kb_description: get().state.step3?.kbDescription || "",
+          kb_faqs: get().state.step3?.kbFaqs || [],
+          objections_list: get().state.step3?.objectionsList || [],
+
           recording_disclosure: get().state.step4?.recordingDisclosure || false,
+          consent_confirmed: get().state.step4?.consentConfirmed || false,
+          country: get().state.step4?.country || "US",
+
+          import_source: get().state.step5?.importSource || "csv",
+          campaign_goal: get().state.step5?.campaignGoal || "",
+          playbook_greeting: get().state.step5?.playbookGreeting || "",
+          playbook_booking_link: get().state.step5?.playbookBookingLink || "",
         }),
       });
 
@@ -173,7 +201,7 @@ export const useOnboardingStore = create<OnboardingStore>((set, get) => ({
   },
 
   saveProgress: async (newState: OnboardingWizardState) => {
-    set({ isSaving: true });
+    set({ state: newState, isSaving: true });
     // Write to Local Storage instantly for rapid client-side sync
     try {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newState));

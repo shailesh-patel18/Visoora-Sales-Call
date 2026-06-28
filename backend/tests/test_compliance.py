@@ -201,9 +201,15 @@ def test_twiml_disclosure_injections():
     Asserts that the /incoming-call webhook dynamically injects Say tags
     under specific recording and AI disclosure configurations.
     Statutes: Wiretap Act 18 U.S.C. § 2511 & FTC AI Guidelines.
+
+    Rec 5 note: verify_twilio_signature mock bypass now requires BOTH
+    the placeholder token AND APP_ENV=test. We patch the env accordingly.
     """
+    import os
+    from unittest.mock import patch
+
     tenant_id = "acme_compliance_settings"
-    
+
     # 1. Enable Recording + AI Disclosures
     settings_mock = {
         tenant_id: {
@@ -213,22 +219,22 @@ def test_twiml_disclosure_injections():
             "ai_disclosure_text": "You speak with a robot on behalf of [Company]."
         }
     }
-    
+
     with mock_open_for_compliance(settings_data=settings_mock):
-        # We mock Twilio X-Twilio-Signature validation to bypass standard checks
-        # Mock settings twilio token to bypass verify_twilio_signature checks
+        # Rec 5 hardening: mock bypass requires APP_ENV=test AND placeholder token.
+        # Both conditions are explicitly set here to exercise the test-only bypass path.
         settings.twilio_auth_token = "mock"
-        
-        headers = {"X-Twilio-Signature": "any_signature"}
-        url = f"/incoming-call?phone=%2B1212&name=Alice&company=WayneCorp&tenant_id={tenant_id}"
-        
-        response = client.post(url, headers=headers)
-        assert response.status_code == 200
-        
-        # Verify XML announcements
-        xml_content = response.text
-        assert "<Say" in xml_content
-        assert "This call is recorded." in xml_content
-        assert "WayneCorp" in xml_content # Replaces [Company] dynamically
-        assert "robot" in xml_content
-        assert "<Connect>" in xml_content # Bridges to media websocket stream after TTS disclosure
+        with patch.dict(os.environ, {"APP_ENV": "test"}):
+            headers = {"X-Twilio-Signature": "any_signature"}
+            url = f"/incoming-call?phone=%2B1212&name=Alice&company=WayneCorp&tenant_id={tenant_id}"
+
+            response = client.post(url, headers=headers)
+            assert response.status_code == 200
+
+            # Verify XML announcements
+            xml_content = response.text
+            assert "<Say" in xml_content
+            assert "This call is recorded." in xml_content
+            assert "WayneCorp" in xml_content  # Replaces [Company] dynamically
+            assert "robot" in xml_content
+            assert "<Connect>" in xml_content  # Bridges to media websocket stream after TTS disclosure

@@ -21,8 +21,23 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 supabase_client: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
     try:
-        supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-        print("[Storage Manager] Supabase Client Initialized Successfully.")
+        import httpx
+        # Fast, non-blocking check to confirm the URL is reachable (1.5-second timeout)
+        try:
+            with httpx.Client(timeout=1.5) as check_client:
+                # Perform a HEAD check on the Supabase API base URL
+                resp = check_client.head(SUPABASE_URL)
+                # Any status code indicates the host resolved and responded
+                is_reachable = True
+        except Exception as conn_err:
+            print(f"[Storage Manager] Supabase connectivity check failed: {conn_err}. Bypassing client initialization.")
+            is_reachable = False
+
+        if is_reachable:
+            supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+            print("[Storage Manager] Supabase Client Initialized Successfully.")
+        else:
+            print("[Storage Manager] Supabase is offline. Local recording storage active.")
     except Exception as e:
         print(f"[Storage Manager] Error initializing Supabase: {e}")
 else:
@@ -100,11 +115,35 @@ class CallSessionTracker:
         # Safe serializable transcript representation
         safe_transcript = transcript or []
         
+        # -------------------------------------------------------------------
+        # TENANT ISOLATION GUARD
+        # Default placeholder tenant IDs in a production (Supabase-connected)
+        # environment indicate the call's tenant was never properly resolved.
+        # Routing these to the real tenant bucket would silently mix cross-tenant
+        # data. We quarantine them to a dedicated bucket and fire a CRITICAL log
+        # so an operator can reconcile the recording.
+        # -------------------------------------------------------------------
+        DEFAULT_TENANT_IDS = {"default_tenant", "default_shared_tenant", ""}
+        is_default_tenant = tenant_id.strip() in DEFAULT_TENANT_IDS
+
+        if supabase_client and is_default_tenant:
+            print(
+                f"[Storage Manager] CRITICAL: upload_recording called with default/empty tenant_id "
+                f"('{tenant_id}') while Supabase is configured. "
+                f"This recording (SID: {stream_sid}) will be quarantined to 'recordings-uncategorized'. "
+                f"Investigate the call flow to ensure tenant_id is resolved before recording upload."
+            )
+            # Override to quarantine bucket — prevents cross-tenant data mixing
+            quarantine_tenant = "uncategorized"
+        else:
+            quarantine_tenant = None  # Use the provided tenant_id normally
+
         # 2. Resilient DB & Bucket uploads
         if supabase_client:
             try:
-                # Upload .wav bytes asynchronously to the Supabase Storage Bucket
-                bucket_name = f"recordings-{tenant_id}"
+                # Use quarantine bucket for default/unknown tenants to prevent cross-tenant mixing
+                effective_tenant = quarantine_tenant if quarantine_tenant else tenant_id
+                bucket_name = f"recordings-{effective_tenant}"
                 res = supabase_client.storage.from_(bucket_name).upload(
                     path=filename,
                     file=wav_data,
@@ -115,8 +154,12 @@ class CallSessionTracker:
                 public_url = supabase_client.storage.from_(bucket_name).get_public_url(filename)
                 
                 # Insert telemetry row into call_logs table
+                # CRITICAL: tenant_id MUST be included so Supabase RLS policies
+                # can enforce row-level tenant isolation. Missing this field
+                # causes cross-tenant data leakage and RLS bypass.
                 log_data = {
                     "id": str(uuid.uuid4()),
+                    "tenant_id": effective_tenant,  # RLS enforcement — never omit
                     "phone_number": phone_number,
                     "duration_seconds": duration_sec,
                     "final_state": final_state,
@@ -140,8 +183,11 @@ class CallSessionTracker:
         local_url = f"/recordings/{filename}"
         
         # Write to JSON registry
+        # tenant_id included so local _aggregate_from_local_logs() can filter
+        # per-tenant without mixing data across tenants in the local fallback.
         log_entry = {
             "id": str(uuid.uuid4()),
+            "tenant_id": tenant_id,  # Required for local tenant isolation
             "phone_number": phone_number,
             "duration_seconds": duration_sec,
             "final_state": final_state,
@@ -159,6 +205,36 @@ class CallSessionTracker:
                 f.truncate()
         except Exception as e:
             print(f"[Storage Manager] Error writing local log registry: {e}")
+
+        lead_id = None
+        if safe_transcript:
+            lead_id = next(
+                (
+                    turn.get("lead_id")
+                    for turn in safe_transcript
+                    if isinstance(turn, dict) and turn.get("lead_id")
+                ),
+                None,
+            )
+        if lead_id and tenant_id not in DEFAULT_TENANT_IDS:
+            try:
+                from sales_employee.services import history_service
+
+                history_service.add(
+                    tenant_id=tenant_id,
+                    lead_id=lead_id,
+                    channel="call",
+                    direction="outbound",
+                    status=final_state,
+                    content_ref=local_url,
+                    metadata={
+                        "stream_sid": stream_sid,
+                        "phone_number": phone_number,
+                        "duration_seconds": duration_sec,
+                    },
+                )
+            except Exception as e:
+                print(f"[Storage Manager] Unified interaction history write failed: {e}")
             
         print(f"[Storage Manager] Saved call to Local Storage: {local_path}")
         return local_url

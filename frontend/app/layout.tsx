@@ -1,7 +1,7 @@
 import "./globals.css";
 import type { Metadata } from "next";
 import { Providers } from "./providers";
-import { Sidebar } from "./components/sidebar";
+import { LayoutWrapper } from "./components/layout-wrapper";
 
 export const metadata: Metadata = {
   title: "Visoora — AI Sales Command Center",
@@ -16,14 +16,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <body className="min-h-screen antialiased">
+      <body className="min-h-screen antialiased bg-[hsl(var(--surface-0))]">
         <Providers>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-            <main className="flex-1 overflow-y-auto">{children}</main>
-          </div>
+          <LayoutWrapper>{children}</LayoutWrapper>
         </Providers>
       </body>
     </html>
   );
 }
+

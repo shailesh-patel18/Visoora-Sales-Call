@@ -84,6 +84,19 @@ async def verify_supabase_jwt(token: str) -> Dict[str, Any]:
     Decodes and verifies a Supabase-issued Bearer JWT.
     Enforces expiration, audience, issuer validation, and signature verification.
     """
+    # ── Development & Testing Fallback ──────────────────────────────
+    if settings.app_env in ("development", "test"):
+        try:
+            payload = jwt.decode(
+                token,
+                "mock_secret_key_visoora_auth",
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+            return payload
+        except Exception:
+            pass
+
     try:
         # Extract headers first without verification to find Key ID (KID)
         unverified_headers = jwt.get_unverified_header(token)

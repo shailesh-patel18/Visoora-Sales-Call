@@ -8,6 +8,8 @@ export const step1Schema = z.object({
   website: z.string().url("Invalid website URL. Must start with http:// or https://"),
   industry: z.string().min(1, "Please select an industry"),
   teamSize: z.string().min(1, "Please select your team size"),
+  annualRevenue: z.string().min(1, "Please select estimated annual revenue"),
+  targetRegion: z.string().min(1, "Please select target call region"),
 });
 
 export type Step1Data = z.infer<typeof step1Schema>;
@@ -43,9 +45,23 @@ export const step3Schema = z.object({
   companyDescription: z.string().min(20, "Please provide at least 20 characters describing your company"),
   valueProposition: z.string().min(10, "Please provide a value proposition (at least 10 characters)"),
   voice: z.string().min(1, "Please select a voice profile"),
+  tone: z.string().min(1, "Please select a tone profile"),
   timezone: z.string().min(1, "Please select a timezone"),
   callingHoursStart: z.string().regex(/^\d{2}:\d{2}$/, "Invalid time format (HH:MM)"),
   callingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/, "Invalid time format (HH:MM)"),
+  productName: z.string().min(2, "Product name must be at least 2 characters"),
+  productPrice: z.string().min(1, "Please specify product pricing (e.g. $99/mo)"),
+  productFeatures: z.string().min(10, "Please outline core features (at least 10 characters)"),
+  targetAudience: z.string().min(10, "Please describe the target audience (at least 10 characters)"),
+  kbDescription: z.string().optional(),
+  kbFaqs: z.array(z.object({
+    question: z.string().min(5, "Question must be at least 5 characters"),
+    answer: z.string().min(5, "Answer must be at least 5 characters")
+  })).optional(),
+  objectionsList: z.array(z.object({
+    objection: z.string().min(5, "Objection trigger must be at least 5 characters"),
+    rebuttal: z.string().min(5, "Rebuttal response must be at least 5 characters")
+  })).optional(),
 });
 
 export type Step3Data = z.infer<typeof step3Schema>;
@@ -68,6 +84,9 @@ export type Step4Data = z.infer<typeof step4Schema>;
 // ====================================================
 export const step5Schema = z.object({
   importSource: z.enum(["csv", "hubspot", "salesforce"]),
+  campaignGoal: z.string().min(1, "Please select a campaign goal"),
+  playbookGreeting: z.string().min(10, "Playbook greeting script must be at least 10 characters"),
+  playbookBookingLink: z.string().url("Invalid booking URL. Must start with http:// or https://").or(z.string().length(0)).optional(),
 });
 
 export type Step5Data = z.infer<typeof step5Schema>;

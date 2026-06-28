@@ -20,9 +20,10 @@ from crm.auto_advance import (
 
 logger = structlog.get_logger("visoora_crm_api")
 
-from security.rbac import get_current_user
+from security.rbac import get_current_user, UserPrincipal
+from security.config import settings
 
-router = APIRouter(prefix="/api/v1/crm", tags=["CRM"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api/v1/crm", tags=["CRM"])
 
 
 # ====================================================
@@ -60,9 +61,10 @@ def _stringify_uuids(data: Dict[str, Any]) -> Dict[str, Any]:
 # CONTACTS CRUD ENDPOINTS
 # ====================================================
 @router.post("/contacts", response_model=ContactResponse, status_code=status.HTTP_201_CREATED)
-async def create_contact(contact: ContactCreate):
+async def create_contact(contact: ContactCreate, user: UserPrincipal = Depends(get_current_user)):
     """Creates a new prospect Contact record in Visoora CRM."""
     payload = _stringify_uuids(contact.model_dump())
+    payload["tenant_id"] = user.tenant_id  # Enforce tenant isolation on write
     payload["id"] = str(uuid.uuid4())
     payload["created_at"] = datetime.datetime.utcnow().isoformat()
     payload["updated_at"] = datetime.datetime.utcnow().isoformat()
@@ -79,6 +81,11 @@ async def create_contact(contact: ContactCreate):
                 return res.data[0]
         except Exception as e:
             logger.error("api_create_contact_db_failed", error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database write error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database write not available.")
 
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
@@ -88,14 +95,20 @@ async def create_contact(contact: ContactCreate):
 
 
 @router.get("/contacts", response_model=List[ContactResponse])
-async def list_contacts(tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def list_contacts(user: UserPrincipal = Depends(get_current_user)):
     """List all Contact records associated with the tenant."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("contacts").select("*").eq("tenant_id", tenant_id).execute()
             return res.data or []
         except Exception as e:
             logger.error("api_list_contacts_db_failed", error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database lookup error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database lookup not available.")
 
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
@@ -103,8 +116,9 @@ async def list_contacts(tenant_id: str = Header("acme_tenant", alias="X-Tenant-I
 
 
 @router.get("/contacts/{id}", response_model=ContactResponse)
-async def get_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def get_contact(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Retrieve details of a specific Contact by ID."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("contacts").select("*").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
@@ -112,7 +126,12 @@ async def get_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-
                 return res.data[0]
         except Exception as e:
             logger.error("api_get_contact_db_failed", id=id, error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database lookup error.")
             
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
     matching = [c for c in local_contacts if c.get("id") == str(id) and c.get("tenant_id") == tenant_id]
@@ -123,8 +142,9 @@ async def get_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-
 
 
 @router.put("/contacts/{id}", response_model=ContactResponse)
-async def update_contact(id: UUID, contact: ContactUpdate, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def update_contact(id: UUID, contact: ContactUpdate, user: UserPrincipal = Depends(get_current_user)):
     """Update details of an existing Contact."""
+    tenant_id = user.tenant_id
     updates = _stringify_uuids(contact.model_dump(exclude_unset=True))
     updates["updated_at"] = datetime.datetime.utcnow().isoformat()
 
@@ -143,7 +163,12 @@ async def update_contact(id: UUID, contact: ContactUpdate, tenant_id: str = Head
                 return res.data[0]
         except Exception as e:
             logger.error("api_update_contact_db_failed", id=id, error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database update error.")
             
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
     for c in local_contacts:
@@ -152,12 +177,13 @@ async def update_contact(id: UUID, contact: ContactUpdate, tenant_id: str = Head
             _save_local_json("local_crm_contacts.json", local_contacts)
             return c
 
-    raise HTTPException(status_code=4404 if not supabase_client else 404, detail="Contact not found.")
+    raise HTTPException(status_code=404, detail="Contact not found.")
 
 
 @router.delete("/contacts/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def delete_contact(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Delete a Contact record from Visoora CRM."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("contacts").delete().eq("id", str(id)).eq("tenant_id", tenant_id).execute()
@@ -165,7 +191,12 @@ async def delete_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias=
                 return
         except Exception as e:
             logger.error("api_delete_contact_db_failed", id=id, error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database delete error.")
             
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
     filtered = [c for c in local_contacts if not (c.get("id") == str(id) and c.get("tenant_id") == tenant_id)]
@@ -180,9 +211,10 @@ async def delete_contact(id: UUID, tenant_id: str = Header("acme_tenant", alias=
 # DEALS CRUD ENDPOINTS
 # ====================================================
 @router.post("/deals", response_model=DealResponse, status_code=status.HTTP_201_CREATED)
-async def create_deal(deal: DealCreate):
+async def create_deal(deal: DealCreate, user: UserPrincipal = Depends(get_current_user)):
     """Creates a new active pipeline Deal."""
     payload = _stringify_uuids(deal.model_dump())
+    payload["tenant_id"] = user.tenant_id  # Enforce tenant isolation on write
     payload["id"] = str(uuid.uuid4())
     payload["created_at"] = datetime.datetime.utcnow().isoformat()
     payload["updated_at"] = datetime.datetime.utcnow().isoformat()
@@ -194,7 +226,11 @@ async def create_deal(deal: DealCreate):
                 return res.data[0]
         except Exception as e:
             logger.error("api_create_deal_db_failed", error=str(e))
-            raise HTTPException(status_code=500, detail="Database write error.")
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database write error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database write not available.")
 
     # Local Fallback
     local_deals = _load_local_json("local_crm_deals.json")
@@ -204,23 +240,29 @@ async def create_deal(deal: DealCreate):
 
 
 @router.get("/deals", response_model=List[DealResponse])
-async def list_deals(tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def list_deals(user: UserPrincipal = Depends(get_current_user)):
     """List all active pipeline Deals."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("deals").select("*").eq("tenant_id", tenant_id).execute()
             return res.data or []
         except Exception as e:
             logger.error("api_list_deals_db_failed", error=str(e))
-            raise HTTPException(status_code=500, detail="Database read error.")
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database lookup error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database lookup not available.")
 
     local_deals = _load_local_json("local_crm_deals.json")
     return [d for d in local_deals if d.get("tenant_id") == tenant_id]
 
 
 @router.get("/deals/{id}", response_model=DealResponse)
-async def get_deal(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def get_deal(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Retrieve details of a specific Deal by ID."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("deals").select("*").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
@@ -228,19 +270,24 @@ async def get_deal(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Ten
                 return res.data[0]
         except Exception as e:
             logger.error("api_get_deal_db_failed", id=id, error=str(e))
-            raise HTTPException(status_code=500, detail="Database lookup error.")
-    else:
-        local_deals = _load_local_json("local_crm_deals.json")
-        matching = [d for d in local_deals if d.get("id") == str(id) and d.get("tenant_id") == tenant_id]
-        if matching:
-            return matching[0]
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database lookup error.")
+    
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Deal not found.")
+
+    local_deals = _load_local_json("local_crm_deals.json")
+    matching = [d for d in local_deals if d.get("id") == str(id) and d.get("tenant_id") == tenant_id]
+    if matching:
+        return matching[0]
 
     raise HTTPException(status_code=404, detail="Deal not found.")
 
 
 @router.put("/deals/{id}", response_model=DealResponse)
-async def update_deal(id: UUID, deal: DealUpdate, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def update_deal(id: UUID, deal: DealUpdate, user: UserPrincipal = Depends(get_current_user)):
     """Update details of an existing Deal."""
+    tenant_id = user.tenant_id
     updates = _stringify_uuids(deal.model_dump(exclude_unset=True))
     updates["updated_at"] = datetime.datetime.utcnow().isoformat()
 
@@ -251,21 +298,26 @@ async def update_deal(id: UUID, deal: DealUpdate, tenant_id: str = Header("acme_
                 return res.data[0]
         except Exception as e:
             logger.error("api_update_deal_db_failed", id=id, error=str(e))
-            raise HTTPException(status_code=500, detail="Database modification error.")
-    else:
-        local_deals = _load_local_json("local_crm_deals.json")
-        for d in local_deals:
-            if d.get("id") == str(id) and d.get("tenant_id") == tenant_id:
-                d.update(updates)
-                _save_local_json("local_crm_deals.json", local_deals)
-                return d
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database update error.")
+    
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Deal not found.")
+
+    local_deals = _load_local_json("local_crm_deals.json")
+    for d in local_deals:
+        if d.get("id") == str(id) and d.get("tenant_id") == tenant_id:
+            d.update(updates)
+            _save_local_json("local_crm_deals.json", local_deals)
+            return d
 
     raise HTTPException(status_code=404, detail="Deal not found.")
 
 
 @router.delete("/deals/{id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_deal(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def delete_deal(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Delete a Deal record from pipeline."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("deals").delete().eq("id", str(id)).eq("tenant_id", tenant_id).execute()
@@ -273,13 +325,17 @@ async def delete_deal(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-
                 return
         except Exception as e:
             logger.error("api_delete_deal_db_failed", id=id, error=str(e))
-            raise HTTPException(status_code=500, detail="Database delete error.")
-    else:
-        local_deals = _load_local_json("local_crm_deals.json")
-        filtered = [d for d in local_deals if not (d.get("id") == str(id) and d.get("tenant_id") == tenant_id)]
-        if len(filtered) < len(local_deals):
-            _save_local_json("local_crm_deals.json", filtered)
-            return
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database delete error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Deal not found.")
+
+    local_deals = _load_local_json("local_crm_deals.json")
+    filtered = [d for d in local_deals if not (d.get("id") == str(id) and d.get("tenant_id") == tenant_id)]
+    if len(filtered) < len(local_deals):
+        _save_local_json("local_crm_deals.json", filtered)
+        return
 
     raise HTTPException(status_code=404, detail="Deal not found.")
 
@@ -288,9 +344,10 @@ async def delete_deal(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-
 # ACTIVITIES CRUD ENDPOINTS
 # ====================================================
 @router.post("/activities", response_model=ActivityResponse, status_code=status.HTTP_201_CREATED)
-async def create_activity(activity: ActivityCreate):
+async def create_activity(activity: ActivityCreate, user: UserPrincipal = Depends(get_current_user)):
     """Logs a new Touchpoint Activity."""
     payload = _stringify_uuids(activity.model_dump())
+    payload["tenant_id"] = user.tenant_id  # Enforce tenant isolation on write
     payload["id"] = str(uuid.uuid4())
     payload["created_at"] = datetime.datetime.utcnow().isoformat()
     payload["updated_at"] = datetime.datetime.utcnow().isoformat()
@@ -302,7 +359,11 @@ async def create_activity(activity: ActivityCreate):
                 return res.data[0]
         except Exception as e:
             logger.error("api_create_activity_db_failed", error=str(e))
-            raise HTTPException(status_code=500, detail="Database write error.")
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database write error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database write not available.")
 
     # Local Fallback
     local_activities = _load_local_json("local_crm_activities.json")
@@ -312,23 +373,29 @@ async def create_activity(activity: ActivityCreate):
 
 
 @router.get("/activities", response_model=List[ActivityResponse])
-async def list_activities(tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def list_activities(user: UserPrincipal = Depends(get_current_user)):
     """List all Touchpoint Activities."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("activities").select("*").eq("tenant_id", tenant_id).execute()
             return res.data or []
         except Exception as e:
             logger.error("api_list_activities_db_failed", error=str(e))
-            raise HTTPException(status_code=500, detail="Database read error.")
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database read error.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=500, detail="Supabase offline. Database lookup not available.")
 
     local_activities = _load_local_json("local_crm_activities.json")
     return [a for a in local_activities if a.get("tenant_id") == tenant_id]
 
 
 @router.get("/activities/{id}", response_model=ActivityResponse)
-async def get_activity(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def get_activity(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Retrieve a specific logged Activity by ID."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("activities").select("*").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
@@ -336,12 +403,16 @@ async def get_activity(id: UUID, tenant_id: str = Header("acme_tenant", alias="X
                 return res.data[0]
         except Exception as e:
             logger.error("api_get_activity_db_failed", id=id, error=str(e))
-            raise HTTPException(status_code=500, detail="Database lookup error.")
-    else:
-        local_activities = _load_local_json("local_crm_activities.json")
-        matching = [a for a in local_activities if a.get("id") == str(id) and a.get("tenant_id") == tenant_id]
-        if matching:
-            return matching[0]
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database lookup error.")
+    
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Activity not found.")
+
+    local_activities = _load_local_json("local_crm_activities.json")
+    matching = [a for a in local_activities if a.get("id") == str(id) and a.get("tenant_id") == tenant_id]
+    if matching:
+        return matching[0]
 
     raise HTTPException(status_code=404, detail="Activity not found.")
 
@@ -350,22 +421,29 @@ async def get_activity(id: UUID, tenant_id: str = Header("acme_tenant", alias="X
 # CRM SPECIAL ANALYTICS & TIMELINE ROUTES
 # ====================================================
 @router.get("/pipeline", response_model=List[StageDealsAggregate])
-async def get_crm_pipeline(tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def get_crm_pipeline(user: UserPrincipal = Depends(get_current_user)):
     """Groups deals by active pipeline stages with deal counts and total valuation in USD."""
+    tenant_id = user.tenant_id
     # 1. Fetch or seed stages for this tenant
     stages = await get_or_seed_stages(tenant_id)
     stages = sorted(stages, key=lambda x: x["position"])
 
     # 2. Fetch all deals for this tenant
     deals = []
+    use_local_fallback = not supabase_client
     if supabase_client:
         try:
             res = supabase_client.table("deals").select("*").eq("tenant_id", tenant_id).execute()
             deals = res.data or []
         except Exception as e:
             logger.error("api_pipeline_deals_fetch_failed", error=str(e))
-            raise HTTPException(status_code=500, detail="Error fetching deals.")
-    else:
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database query failed.")
+            use_local_fallback = True
+    
+    if use_local_fallback:
+        if settings.app_env not in ("development", "test"):
+            raise HTTPException(status_code=500, detail="Supabase offline. Database lookup not available.")
         local_deals = _load_local_json("local_crm_deals.json")
         deals = [d for d in local_deals if d.get("tenant_id") == tenant_id]
 
@@ -399,15 +477,20 @@ async def get_crm_pipeline(tenant_id: str = Header("acme_tenant", alias="X-Tenan
 
 
 @router.get("/contact/{id}/timeline", response_model=List[ActivityResponse])
-async def get_contact_timeline(id: UUID, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def get_contact_timeline(id: UUID, user: UserPrincipal = Depends(get_current_user)):
     """Fetch complete chronological activity log history for a contact."""
+    tenant_id = user.tenant_id
     if supabase_client:
         try:
             res = supabase_client.table("activities").select("*").eq("contact_id", str(id)).eq("tenant_id", tenant_id).order("occurred_at", desc=True).execute()
             return res.data or []
         except Exception as e:
             logger.error("api_timeline_fetch_failed", id=id, error=str(e))
-            raise HTTPException(status_code=500, detail="Timeline query failed.")
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Timeline query failed.")
+
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=404, detail="Contact timeline not found.")
 
     # Local Fallback
     local_activities = _load_local_json("local_crm_activities.json")
@@ -536,8 +619,9 @@ async def background_lead_enrichment_worker(contact_id: str, tenant_id: str):
 
 
 @router.post("/contact/{id}/enrich", status_code=status.HTTP_202_ACCEPTED)
-async def enrich_contact(id: UUID, background_tasks: BackgroundTasks, tenant_id: str = Header("acme_tenant", alias="X-Tenant-ID")):
+async def enrich_contact(id: UUID, background_tasks: BackgroundTasks, user: UserPrincipal = Depends(get_current_user)):
     """Trigger background Apollo/Clearbit lead data enrichment tasks."""
+    tenant_id = user.tenant_id
     contact_exists = False
     
     # Assert contact exists before queuing enrichment

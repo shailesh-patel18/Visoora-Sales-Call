@@ -14,6 +14,20 @@ load_dotenv()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_51Pmocked_secret_key_visoora")
 stripe.api_key = STRIPE_SECRET_KEY
 
+if not hasattr(stripe, "StripeClient"):
+    class _StripeClientCompat:
+        def __init__(self, api_key: str):
+            self.api_key = api_key
+
+        def raw_request(self, method: str, path: str, **params):
+            return stripe.api_requestor.APIRequestor(key=self.api_key).request(
+                method,
+                path,
+                params=params,
+            )[0]
+
+    stripe.StripeClient = _StripeClientCompat
+
 # Plan Configuration & Price IDs
 STRIPE_PRICE_STARTER = os.getenv("STRIPE_PRICE_STARTER", "price_starter_99_mo")
 STRIPE_PRICE_PRO = os.getenv("STRIPE_PRICE_PRO", "price_pro_299_mo")

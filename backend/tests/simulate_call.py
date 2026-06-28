@@ -52,7 +52,7 @@ async def run_simulation():
     # ----------------------------------------------------
     print("[TEST 1] Testing FSM State Transitions...")
     lead_metadata = {"name": "Alice Smith", "company": "Acme Corp", "phone": "+15550199"}
-    fsm = StateMachineController(initial_metadata=lead_metadata)
+    fsm = StateMachineController(initial_metadata=lead_metadata, tenant_id="default_shared_tenant")
     
     assert fsm.context.current_state == "INITIATION"
     print(f"  - Initial state: {fsm.context.current_state}")
@@ -94,7 +94,7 @@ async def run_simulation():
     print("[TEST 2] Testing Voice Activity Detection & Interruption...")
     vad = VoiceActivityDetector(threshold=300.0)
     session = MockAgentSession()
-    voice_manager = MockVoicePipelineManager(session, StateMachineController(lead_metadata))
+    voice_manager = MockVoicePipelineManager(session, StateMachineController(lead_metadata, tenant_id="default_shared_tenant"))
     
     # Transition FSM to PITCH so that transitioning to OBJECTION is a valid state change
     voice_manager.state_controller.validate_and_transition("PITCH")

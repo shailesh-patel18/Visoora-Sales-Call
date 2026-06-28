@@ -2,8 +2,8 @@ import os
 import json
 import uuid
 import asyncio
-import httpx
 import datetime
+import httpx
 from typing import Dict, List, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends, Request, Response, BackgroundTasks
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -23,6 +23,13 @@ PROGRESS_FILE = "recordings/local_onboarding_progress.json"
 IMPORT_JOBS: Dict[str, Dict[str, Any]] = {}
 import_lock = asyncio.Lock()
 progress_lock = asyncio.Lock()
+
+def resolve_tenant_uuid(tenant_id: str) -> str:
+    try:
+        uuid.UUID(tenant_id)
+        return tenant_id
+    except ValueError:
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, tenant_id))
 
 if not os.path.exists("recordings"):
     os.makedirs("recordings", exist_ok=True)
@@ -45,6 +52,7 @@ class ImportPayload(BaseModel):
     source: str
     contacts_count: int
     contacts: List[dict]
+    tenant_id: Optional[str] = "default_shared_tenant"
 
 class TestCallPayload(BaseModel):
     phone_number: str
@@ -55,9 +63,33 @@ class CompletePayload(BaseModel):
     tenant_id: str
     company_name: str
     website: str
+    industry: Optional[str] = None
+    team_size: Optional[str] = None
+    annual_revenue: Optional[str] = None
+    target_region: Optional[str] = None
     phone_number: str
     agent_name: str
+    company_description: Optional[str] = None
+    value_proposition: Optional[str] = None
+    voice: Optional[str] = None
+    tone: Optional[str] = None
+    timezone: Optional[str] = None
+    calling_hours_start: Optional[str] = None
+    calling_hours_end: Optional[str] = None
+    product_name: Optional[str] = None
+    product_price: Optional[str] = None
+    product_features: Optional[str] = None
+    target_audience: Optional[str] = None
+    kb_description: Optional[str] = None
+    kb_faqs: Optional[List[Dict[str, str]]] = None
+    objections_list: Optional[List[Dict[str, str]]] = None
     recording_disclosure: bool
+    consent_confirmed: Optional[bool] = None
+    country: Optional[str] = None
+    import_source: Optional[str] = None
+    campaign_goal: Optional[str] = None
+    playbook_greeting: Optional[str] = None
+    playbook_booking_link: Optional[str] = None
 
 class ProgressPayload(BaseModel):
     tenant_id: str
@@ -204,14 +236,14 @@ async def provision_phone_number(payload: ProvisionPayload):
 
             # 2. Create DB Record atomically
             tenant_payload = {
-                "id": tenant_id,
+                "id": resolve_tenant_uuid(tenant_id),
                 "name": f"Tenant {tenant_id}",
                 "twilio_phone": phone,
                 "twilio_subaccount_sid": subaccount_sid,
                 "storage_bucket_name": bucket_name
             }
             supabase_client.table("tenants").upsert(tenant_payload).execute()
-            logger.info("tenant_db_record_created", tenant_id=tenant_id)
+            logger.info("tenant_db_record_created", tenant_id=tenant_id, tenant_uuid=tenant_payload["id"])
         except Exception as e:
             logger.error("tenant_provisioning_db_error", error=str(e))
             raise HTTPException(status_code=500, detail="Failed to provision tenant resources in DB")
@@ -248,8 +280,8 @@ async def background_import_task(job_id: str, payload: ImportPayload):
     Updates progress state thread-safely in memory.
     """
     total_contacts = len(payload.contacts)
-    tenant_id = payload.tenant_id
-    logger.info("background_import_start", job_id=job_id, contacts_count=total_contacts)
+    tenant_id = resolve_tenant_uuid(payload.tenant_id or "default_shared_tenant")
+    logger.info("background_import_start", job_id=job_id, contacts_count=total_contacts, tenant_uuid=tenant_id)
 
     async def update_status(progress: int, status: str):
         async with import_lock:
@@ -263,7 +295,68 @@ async def background_import_task(job_id: str, payload: ImportPayload):
     
     from server.storage_manager import supabase_client
     if not supabase_client:
-        await update_status(100, "Simulated import complete (No DB).")
+        # Supabase is offline. Persist contacts to a local JSON file so data is never lost.
+        # File format matches the Supabase 'contacts' table schema for future bulk sync.
+        local_contacts_path = f"recordings/local_contacts_{tenant_id}.json"
+        logger.info(
+            "csv_import_offline_fallback",
+            job_id=job_id,
+            path=local_contacts_path,
+            total=total_contacts
+        )
+
+        await update_status(20, "Supabase offline. Writing contacts to local storage...")
+
+        existing_contacts = []
+        if os.path.exists(local_contacts_path):
+            try:
+                with open(local_contacts_path, "r") as f:
+                    existing_contacts = json.load(f)
+            except Exception:
+                existing_contacts = []
+
+        new_contacts = []
+        for i, contact_data in enumerate(payload.contacts):
+            phone = contact_data.get("phone", contact_data.get("phone_number", ""))
+            name = contact_data.get("name", contact_data.get("full_name", "Unknown Lead"))
+            if not phone:
+                continue
+            new_contacts.append({
+                "id": str(uuid.uuid4()),
+                "tenant_id": tenant_id,
+                "phone_number": phone,
+                "phone_e164": phone,
+                "name": name,
+                "title": contact_data.get("title", ""),
+                "company": contact_data.get("company", ""),
+                "status": "pending",
+                "created_at": datetime.datetime.utcnow().isoformat()
+            })
+            if i % max(1, total_contacts // 10) == 0:
+                progress = 20 + int((i / total_contacts) * 70)
+                await update_status(progress, f"Saving contact {i + 1}/{total_contacts}...")
+
+        all_contacts = existing_contacts + new_contacts
+        try:
+            with open(local_contacts_path, "w") as f:
+                json.dump(all_contacts, f, indent=2)
+        except Exception as write_err:
+            logger.error("csv_import_local_write_failed", error=str(write_err), job_id=job_id)
+            await update_status(100, f"Local write failed: {str(write_err)}")
+            return
+
+        saved_count = len(new_contacts)
+        logger.info(
+            "csv_import_offline_complete",
+            job_id=job_id,
+            saved_count=saved_count,
+            path=local_contacts_path
+        )
+        await update_status(
+            100,
+            f"Offline: {saved_count} contacts saved to local storage ({local_contacts_path}). "
+            f"Will sync to database when connection is restored."
+        )
         return
 
     await update_status(30, "Sanitizing and upserting records...")
@@ -306,6 +399,8 @@ async def register_contacts_import(payload: ImportPayload, background_tasks: Bac
     """
     Spawns background contact import task and returns jobId.
     """
+    from security.logging import tenant_id_var
+    payload.tenant_id = tenant_id_var.get() or "default_shared_tenant"
     job_id = "job_" + str(uuid.uuid4())[:8]
     async with import_lock:
         IMPORT_JOBS[job_id] = {
@@ -398,12 +493,138 @@ async def trigger_test_call(payload: TestCallPayload):
 # ----------------------------------------------------
 # 6. WIZARD COMPLETED & RESEND WELCOME EMAIL SENDER
 # ----------------------------------------------------
+# ----------------------------------------------------
 @onboarding_router.post("/onboarding/complete")
 async def onboarding_complete(payload: CompletePayload):
     """
     Triggers a welcome email via Resend API and finalizes onboarding configurations.
+    Updates Supabase agent_configs and compliance tables, cascading to local fallback.
     """
-    logger.info("onboarding_complete_finalizing", tenant=payload.tenant_id)
+    tenant_id = payload.tenant_id
+    tenant_uuid = resolve_tenant_uuid(tenant_id)
+    logger.info("onboarding_complete_finalizing", tenant=tenant_id, tenant_uuid=tenant_uuid)
+
+    # Serialize advanced SDR configs (tone, FAQs, objections, playbook settings) inside 'persona' text field.
+    persona_data = {
+        "agent_name": payload.agent_name,
+        "voice": payload.voice,
+        "tone": payload.tone,
+        "timezone": payload.timezone,
+        "calling_hours_start": payload.calling_hours_start,
+        "calling_hours_end": payload.calling_hours_end,
+        "product_name": payload.product_name,
+        "product_price": payload.product_price,
+        "product_features": payload.product_features,
+        "target_audience": payload.target_audience,
+        "kb_description": payload.kb_description,
+        "kb_faqs": payload.kb_faqs or [],
+        "objections_list": payload.objections_list or [],
+        "campaign_goal": payload.campaign_goal,
+        "playbook_greeting": payload.playbook_greeting,
+        "playbook_booking_link": payload.playbook_booking_link,
+        "industry": payload.industry,
+        "team_size": payload.team_size,
+        "annual_revenue": payload.annual_revenue,
+        "target_region": payload.target_region,
+        "import_source": payload.import_source,
+        "consent_confirmed": payload.consent_confirmed,
+        "country": payload.country,
+    }
+
+    from server.storage_manager import supabase_client
+    if supabase_client:
+        try:
+            # 1. Update/Upsert agent_configs table
+            config_payload = {
+                "tenant_id": tenant_uuid,
+                "company_description": payload.company_description or "",
+                "value_proposition": payload.value_proposition or "",
+                "persona": json.dumps(persona_data)
+            }
+            existing = supabase_client.table("agent_configs").select("id").eq("tenant_id", tenant_uuid).execute()
+            if existing.data:
+                supabase_client.table("agent_configs").update(config_payload).eq("id", existing.data[0]["id"]).execute()
+            else:
+                config_payload["id"] = str(uuid.uuid4())
+                supabase_client.table("agent_configs").insert(config_payload).execute()
+            logger.info("supabase_agent_configs_updated", tenant_uuid=tenant_uuid)
+
+            # 2. Update/Upsert tenant_compliance_settings table
+            comp_payload = {
+                "tenant_id": tenant_uuid,
+                "recording_disclosure_enabled": payload.recording_disclosure,
+                "recording_disclosure_text": "This call may be recorded for quality and training purposes.",
+                "ai_disclosure_enabled": True,
+                "ai_disclosure_text": "You are speaking with an automated assistant."
+            }
+            existing_comp = supabase_client.table("tenant_compliance_settings").select("id").eq("tenant_id", tenant_uuid).execute()
+            if existing_comp.data:
+                supabase_client.table("tenant_compliance_settings").update(comp_payload).eq("id", existing_comp.data[0]["id"]).execute()
+            else:
+                comp_payload["id"] = str(uuid.uuid4())
+                supabase_client.table("tenant_compliance_settings").insert(comp_payload).execute()
+            logger.info("supabase_tenant_compliance_settings_updated", tenant_uuid=tenant_uuid)
+
+        except Exception as e:
+            logger.error("supabase_onboarding_db_update_failed", error=str(e))
+
+    # Cascade save completed progress data to local PROGRESS_FILE registry
+    async with progress_lock:
+        try:
+            with open(PROGRESS_FILE, "r") as f:
+                registry = json.load(f)
+            
+            # Map raw fields to structured step objects matching Zustand state
+            registry[tenant_id] = {
+                "currentStep": 6,
+                "isCompleted": True,
+                "step1": {
+                    "companyName": payload.company_name,
+                    "website": payload.website,
+                    "industry": payload.industry or "",
+                    "teamSize": payload.team_size or "",
+                    "annualRevenue": payload.annual_revenue or "",
+                    "targetRegion": payload.target_region or "",
+                },
+                "step2": {
+                    "phoneOption": "buy",
+                    "twilioNumber": payload.phone_number,
+                },
+                "step3": {
+                    "agentName": payload.agent_name,
+                    "companyDescription": payload.company_description or "",
+                    "valueProposition": payload.value_proposition or "",
+                    "voice": payload.voice or "rachel",
+                    "tone": payload.tone or "consultative",
+                    "timezone": payload.timezone or "America/New_York",
+                    "callingHoursStart": payload.calling_hours_start or "08:00",
+                    "callingHoursEnd": payload.calling_hours_end or "17:00",
+                    "productName": payload.product_name or "",
+                    "productPrice": payload.product_price or "",
+                    "productFeatures": payload.product_features or "",
+                    "targetAudience": payload.target_audience or "",
+                    "kbDescription": payload.kb_description or "",
+                    "kbFaqs": payload.kb_faqs or [],
+                    "objectionsList": payload.objections_list or [],
+                },
+                "step4": {
+                    "consentConfirmed": payload.consent_confirmed or False,
+                    "recordingDisclosure": payload.recording_disclosure,
+                    "country": payload.country or "US",
+                },
+                "step5": {
+                    "importSource": payload.import_source or "csv",
+                    "campaignGoal": payload.campaign_goal or "",
+                    "playbookGreeting": payload.playbook_greeting or "",
+                    "playbookBookingLink": payload.playbook_booking_link or "",
+                }
+            }
+            
+            with open(PROGRESS_FILE, "w") as f:
+                json.dump(registry, f, indent=2)
+            logger.info("local_progress_registry_finalized", tenant=tenant_id)
+        except Exception as e:
+            logger.error("failed_to_finalize_local_progress", error=str(e))
     
     # Trigger Welcome Email via Resend HTTP Post
     email_url = "https://api.resend.com/emails"

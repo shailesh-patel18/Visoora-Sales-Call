@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import random
 import datetime
 import asyncio
 from typing import Optional, List, Dict, Any, Callable
@@ -68,11 +69,13 @@ class ValidationChain:
     Enforces conversational safety guardrails, sentence limits, profanity checks,
     and regex-based blocklists with semantic fallback routing.
     """
-    def __init__(self, blocklist_phrases: Optional[List[str]] = None):
+    def __init__(self, blocklist_phrases=None, allowed_sources_text: str = ""):
         self.blocklist = blocklist_phrases or [
             "As an AI", "I'm a bot", "I'm programmed",
             "I guarantee", "100% success rate"
         ]
+        # Pre-computed allowed sources text for price grounding check
+        self.allowed_sources_text = allowed_sources_text.lower()
         
     def truncate_to_two_sentences(self, text: str) -> str:
         """Truncates the generated output strictly at the second sentence boundary."""
@@ -91,10 +94,14 @@ class ValidationChain:
             if re.search(pattern, lower_txt):
                 return True
                 
-        # 2. Check pricing mentions (forbidden if any unapproved price tag is cited)
-        # Any mention of dollar values e.g. $100 or 100 dollars is banned unless in a pre-approved list
-        if re.search(r"\$\d+|\b\d+\s*dollars\b|\b\d+\s*bucks\b", lower_txt):
-            return True
+        # 2. Check pricing mentions — only block dollar values NOT present in the approved
+        #    grounding sources. This prevents the guard from blocking the AI's own
+        #    product pricing (e.g., "$499/month") which is a legitimate grounded claim.
+        dollar_matches = re.findall(r"\$\d+|\b\d+\s*dollars\b|\b\d+\s*bucks\b", lower_txt)
+        for price_mention in dollar_matches:
+            # Strip punctuation to get the bare number/phrase for source comparison
+            if price_mention not in self.allowed_sources_text:
+                return True
 
         # 3. Check Competitor blocklist
         for comp in UNAPPROVED_COMPETITORS:
@@ -244,11 +251,8 @@ class LLMProviderFallbackChain:
             if len(self.failures_timestamps) >= 3:
                 # Trigger failover transition
                 if self.active_provider == "google":
-                    self.active_provider = "claude"
-                    logger.warn("llm_circuit_breaker_tripped", msg="Google failed 3x in 60s. Failing over to Claude.")
-                elif self.active_provider == "claude":
                     self.active_provider = "gpt4o"
-                    logger.warn("llm_circuit_breaker_tripped", msg="Claude failed 3x in 60s. Failing over to GPT-4o.")
+                    logger.warn("llm_circuit_breaker_tripped", msg="Google failed 3x in 60s. Failing over to GPT-4o.")
                 elif self.active_provider == "gpt4o":
                     self.active_provider = "emergency"
                     logger.warn("llm_circuit_breaker_tripped", msg="GPT-4o failed 3x in 60s. Transitioning to Emergency local scripted responses.")
@@ -261,8 +265,6 @@ class LLMProviderFallbackChain:
         try:
             if current == "google":
                 return await provider_calls["google"]()
-            elif current == "claude":
-                return await provider_calls["claude"]()
             elif current == "gpt4o":
                 return await provider_calls["gpt4o"]()
             else:
@@ -347,7 +349,9 @@ class LLMGuardSystem:
     Runs output validations, claim grounding checks, and latency masks.
     """
     def __init__(self, allowed_grounding_sources: List[str], approved_competitors: List[str] = None):
-        self.validator = ValidationChain()
+        self.validator = ValidationChain(
+            allowed_sources_text=" ".join(allowed_grounding_sources)
+        )
         self.grounding = GroundingChecker(allowed_grounding_sources)
         self.fallback_chain = LLMProviderFallbackChain()
         self.latency = LatencyEnforcer()
@@ -398,7 +402,7 @@ class LLMGuardSystem:
         # 0. Pre-generation Prompt Injection Check
         if not self.verify_prompt_safety(prompt_text):
             logger.error("safety_guard_violation", reason="prompt_injection_prevention")
-            return "I am an AI assistant and cannot assist with that."
+            return random.choice(SAFE_RECOVERY_POOL)
 
         # Redact prompt for safe logging
         safe_log_prompt = self.redact_pii_for_logging(prompt_text)
@@ -416,7 +420,7 @@ class LLMGuardSystem:
         # Check command allowlist
         if not self.check_command_allowlist(raw_text):
             logger.error("safety_guard_violation", reason="unapproved_command")
-            return "I am an AI assistant and cannot assist with that."
+            return random.choice(SAFE_RECOVERY_POOL)
 
         # Enforce max 2 sentences limit
         truncated_text = self.validator.truncate_to_two_sentences(raw_text)
@@ -425,12 +429,12 @@ class LLMGuardSystem:
         if (self.validator.check_forbidden_phrases(truncated_text, self.approved_competitors) or
             self.validator.check_profanity_or_offtopic(truncated_text)):
             logger.error("safety_guard_violation", action="substitution", raw_text=self.redact_pii_for_logging(raw_text))
-            return "I am an AI assistant and cannot assist with that."
+            return random.choice(SAFE_RECOVERY_POOL)
 
         # 3. Grounding Verification
         grounding_score = self.grounding.check_grounding_score(truncated_text)
         if grounding_score > 0.7:
             logger.error("grounding_score_violation", score=grounding_score, action="grounding_substitution")
-            return "I am an AI assistant and cannot assist with that."
+            return GROUNDING_RECOVERY
 
         return truncated_text

@@ -53,8 +53,11 @@ export default function Step5Page() {
     formState: { errors },
   } = useForm<Step5Data>({
     resolver: zodResolver(step5Schema),
-    defaultValues: state.step5 || {
-      importSource: "csv",
+    defaultValues: {
+      importSource: state.step5?.importSource || "csv",
+      campaignGoal: state.step5?.campaignGoal || "Book Demo Meeting",
+      playbookGreeting: state.step5?.playbookGreeting || "Hi, this is Alex from Visoora. I wanted to follow up on your interest in our product. How are you doing today?",
+      playbookBookingLink: state.step5?.playbookBookingLink || "",
     },
   });
 
@@ -172,6 +175,7 @@ export default function Step5Page() {
 
   const onSubmit = async (data: Step5Data) => {
     await updateStep5({
+      ...data,
       importSource: activeTab === "csv" ? "csv" : (crmProvider || "hubspot"),
     });
     router.push("/onboarding/step-6");
@@ -451,6 +455,71 @@ export default function Step5Page() {
             </div>
           </div>
         )}
+
+        {/* Campaign Playbook Settings */}
+        <div className="p-4 rounded-xl border flex flex-col gap-4" style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))" }}>
+          <p className="text-xs font-bold" style={{ color: "hsl(var(--text-primary))" }}>
+            Campaign & Playbook Settings
+          </p>
+          <p className="text-[10px]" style={{ color: "hsl(var(--text-muted))" }}>
+            Define the goal and greeting script your AI SDR will use when calling these leads.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "hsl(var(--text-secondary))" }}>
+                Campaign Goal
+              </label>
+              <select
+                {...register("campaignGoal")}
+                className="px-3 py-2 rounded text-xs border outline-none transition-all focus:border-[hsl(var(--brand-primary))]"
+                style={{ background: "hsl(var(--surface-3))", borderColor: "hsl(var(--border-subtle))", color: "hsl(var(--text-primary))" }}
+              >
+                <option value="Book Demo Meeting">Book Demo Meeting</option>
+                <option value="Qualify Leads">Qualify Leads</option>
+                <option value="Collect Payments">Collect Payments</option>
+              </select>
+              {errors.campaignGoal && (
+                <p className="text-[10px] text-rose-400 font-semibold">{errors.campaignGoal.message}</p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "hsl(var(--text-secondary))" }}>
+                Calendar Booking Link (Optional)
+              </label>
+              <input
+                type="text"
+                {...register("playbookBookingLink")}
+                placeholder="https://calendly.com/your-username"
+                className="px-3 py-2 rounded text-xs border outline-none transition-all focus:border-[hsl(var(--brand-primary))]"
+                style={{ background: "hsl(var(--surface-3))", borderColor: "hsl(var(--border-subtle))", color: "hsl(var(--text-primary))" }}
+              />
+              {errors.playbookBookingLink && (
+                <p className="text-[10px] text-rose-400 font-semibold">{errors.playbookBookingLink.message}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "hsl(var(--text-secondary))" }}>
+              Playbook Greeting Script
+            </label>
+            <textarea
+              {...register("playbookGreeting")}
+              rows={3}
+              placeholder="e.g. Hello, my name is Alex calling from Visoora. I saw that you were interested in our AI calling solutions. How is your day going?"
+              className="px-3 py-2 rounded text-xs border outline-none transition-all focus:border-[hsl(var(--brand-primary))] resize-none"
+              style={{ background: "hsl(var(--surface-3))", borderColor: "hsl(var(--border-subtle))", color: "hsl(var(--text-primary))" }}
+            />
+            <p className="text-[9px]" style={{ color: "hsl(var(--text-muted))" }}>
+              Make this greeting engaging. Start with a friendly greeting, state your name and company, and end with an open-ended question to transition the call.
+            </p>
+            {errors.playbookGreeting && (
+              <p className="text-[10px] text-rose-400 font-semibold">{errors.playbookGreeting.message}</p>
+            )}
+          </div>
+        </div>
 
         {/* Action Controls */}
         <div className="flex items-center justify-between gap-4 mt-2">

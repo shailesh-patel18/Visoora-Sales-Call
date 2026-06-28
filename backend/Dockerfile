@@ -28,6 +28,8 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PATH=/home/app/.local/bin:$PATH
+ENV PORT=8000
+ENV WEB_CONCURRENCY=1
 
 # Install runtime system libraries (e.g. libpq for Postgres)
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -46,5 +48,9 @@ COPY --chown=app:app . .
 
 EXPOSE 8000
 
-# Run high-performance production server
-CMD ["gunicorn", "server.twilio_handler:app", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health/live' % os.getenv('PORT','8000'), timeout=3).read()"
+
+# Default to one worker because Twilio Media Streams and local fallbacks are in-memory.
+# Scale workers only when Redis/Supabase are configured and sticky routing is in place.
+CMD ["sh", "-c", "gunicorn server.twilio_handler:app --workers ${WEB_CONCURRENCY:-1} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --graceful-timeout 30 --keep-alive 30"]

@@ -10,6 +10,7 @@ import {
   ShieldBan,
   Filter,
   MoreHorizontal,
+  Trash2,
   ArrowUpDown,
   Mail,
   Building2,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import { useCRMStore, type Contact } from "../store";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 // ====================================================
 // MOCK DATA
@@ -89,7 +91,7 @@ const countries = [
 ];
 
 export default function ContactsPage() {
-  const { contacts, setContacts, addContact } = useCRMStore();
+  const { contacts, setContacts, addContact, removeContact } = useCRMStore();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<"full_name" | "lead_score" | "created_at">("lead_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -137,10 +139,7 @@ export default function ContactsPage() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
         method: "POST",
-        headers: { 
-          "Content-Type": "application/json",
-          "X-Tenant-ID": "acme_tenant"
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload)
       });
       if (res.ok) {
@@ -149,21 +148,9 @@ export default function ContactsPage() {
       } else {
         const errData = await res.json();
         console.error("Failed to save contact on backend:", errData);
-        addContact({
-          id: `contact_${Date.now()}`,
-          ...payload,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        });
       }
     } catch (err) {
-      console.warn("Failed to contact backend, saving locally:", err);
-      addContact({
-        id: `contact_${Date.now()}`,
-        ...payload,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      console.warn("Failed to contact backend:", err);
     }
 
     // Reset Form Fields
@@ -178,21 +165,14 @@ export default function ContactsPage() {
   const fetchContacts = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const data = await res.json();
-        if (data && data.length > 0) {
-          setContacts(data);
-        } else {
-          setContacts(generateMockContacts());
-        }
-      } else {
-        setContacts(generateMockContacts());
+        setContacts(data || []);
       }
     } catch (err) {
-      console.warn("Failed to fetch contacts, using local mock:", err);
-      setContacts(generateMockContacts());
+      console.warn("Failed to fetch contacts:", err);
     }
   };
 
@@ -244,7 +224,7 @@ export default function ContactsPage() {
     try {
       await fetch(`${BACKEND_URL}/make-call`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: contact.full_name,
           company: contact.company_name,
@@ -273,6 +253,23 @@ export default function ContactsPage() {
     a.download = "visoora_contacts.csv";
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleDeleteContact = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this contact?")) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        removeContact(id);
+      } else {
+        console.error("Failed to delete contact on backend");
+      }
+    } catch (err) {
+      console.warn("Failed to delete contact:", err);
+    }
   };
 
   if (!mounted) return null;
@@ -398,8 +395,13 @@ export default function ContactsPage() {
                       >
                         <Phone className={`w-3.5 h-3.5 ${dialing === contact.id ? "animate-pulse" : ""}`} />
                       </button>
-                      <button className="p-2 rounded-lg transition-colors" style={{ background: "hsl(var(--surface-3))", color: "hsl(var(--text-secondary))" }} title="More actions">
-                        <MoreHorizontal className="w-3.5 h-3.5" />
+                      <button
+                        onClick={() => handleDeleteContact(contact.id)}
+                        className="p-2 rounded-lg transition-colors"
+                        style={{ background: "hsla(0, 84%, 60%, 0.1)", color: "#ef4444" }}
+                        title="Delete contact"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                   </td>

@@ -2,17 +2,6 @@
 const nextConfig = {
   reactStrictMode: true,
   
-  // Clean redirect mapping / to /dashboard
-  async redirects() {
-    return [
-      {
-        source: '/',
-        destination: '/dashboard',
-        permanent: true,
-      },
-    ]
-  },
-  
   // Custom CORS, Content Security, and developmental resource headers
   async headers() {
     return [

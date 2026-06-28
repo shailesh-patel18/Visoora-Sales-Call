@@ -1,109 +1,47 @@
-version: '3.8'
+version: "3.8"
 
 services:
-  # ----------------------------------------------------
-  # Shared Cache & State Store (Redis Cluster / Instance)
-  # ----------------------------------------------------
   redis:
-    image: redis:7.0-alpine
+    image: redis:7.2-alpine
     container_name: visoora-redis
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    networks:
-      - visoora-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 3s
       retries: 5
 
-  # ----------------------------------------------------
-  # API Gateway & Sticky Load Balancer (Nginx Proxy)
-  # ----------------------------------------------------
-  api-gateway:
-    image: nginx:1.25-alpine
-    container_name: visoora-gateway
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: visoora-api
     ports:
-      - "8000:80"
+      - "${PORT:-8000}:8000"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      PORT: 8000
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-1}
+      REDIS_URL: redis://redis:6379/0
+      SERVER_PUBLIC_DOMAIN: ${SERVER_PUBLIC_DOMAIN:-}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-your_twilio_auth_token_here}
+      TWILIO_TRIAL_NUMBER: ${TWILIO_TRIAL_NUMBER:-+15017122661}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      SYSTEM_API_KEYS: ${SYSTEM_API_KEYS:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
-      - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - call-orchestrator
-      - audio-processor
-    networks:
-      - visoora-network
-
-  # ----------------------------------------------------
-  # Service 1: Call Orchestrator (HTTP Webhooks & API)
-  # ----------------------------------------------------
-  call-orchestrator:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: visoora-orchestrator
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}
-      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-your_twilio_auth_token_here}
-      - TWILIO_TRIAL_NUMBER=${TWILIO_TRIAL_NUMBER:-+15017122661}
-      - SUPABASE_URL=${SUPABASE_URL:-}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
-      - SERVICE_TYPE=orchestrator
-      - POD_ID=orchestrator-pod
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - visoora-network
-
-  # ----------------------------------------------------
-  # Service 2: Audio Processor (WebSockets & Real-Time Audio)
-  # ----------------------------------------------------
-  audio-processor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: visoora-processor
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX}
-      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-your_twilio_auth_token_here}
-      - SERVICE_TYPE=audio-processor
-      - POD_ID=audio-processor-pod
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - visoora-network
-
-  # ----------------------------------------------------
-  # Service 3: Recording Worker (Asynchronous Post-processing)
-  # ----------------------------------------------------
-  recording-worker:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: visoora-worker
-    environment:
-      - REDIS_URL=redis://redis:6379/0
-      - SUPABASE_URL=${SUPABASE_URL:-}
-      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY:-}
-      - SERVICE_TYPE=worker
-      - POD_ID=worker-pod
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
-    depends_on:
-      redis:
-        condition: service_healthy
-    networks:
-      - visoora-network
+      - recordings_data:/app/recordings
 
 volumes:
   redis_data:
-
-networks:
-  visoora-network:
-    name: visoora-network
+  recordings_data:

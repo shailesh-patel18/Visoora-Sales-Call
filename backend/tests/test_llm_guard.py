@@ -163,16 +163,16 @@ async def test_llm_provider_circuit_breaker():
     await chain.record_failure_and_check_failover()
     await chain.record_failure_and_check_failover()
     
-    # Assert active provider auto-switched to claude
-    assert chain.active_provider == "claude"
+    # Assert active provider auto-switched to gpt4o directly (claude removed)
+    assert chain.active_provider == "gpt4o"
 
     # Simulate 3 more failures
     await chain.record_failure_and_check_failover()
     await chain.record_failure_and_check_failover()
     await chain.record_failure_and_check_failover()
     
-    # Assert active provider auto-switched to gpt4o
-    assert chain.active_provider == "gpt4o"
+    # Assert active provider auto-switched to emergency
+    assert chain.active_provider == "emergency"
 
 
 # ====================================================

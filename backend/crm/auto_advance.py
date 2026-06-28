@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 import structlog
 from server.storage_manager import supabase_client
+from security.config import settings
 
 logger = structlog.get_logger("visoora_crm")
 
@@ -31,6 +32,8 @@ class CallResult(BaseModel):
 LOCAL_CRM_DIR = "recordings"
 
 def _load_local_json(filename: str) -> List[Dict[str, Any]]:
+    if settings.app_env not in ("development", "test"):
+        raise RuntimeError(f"Local file fallback read forbidden in environment: {settings.app_env}")
     os.makedirs(LOCAL_CRM_DIR, exist_ok=True)
     filepath = os.path.join(LOCAL_CRM_DIR, filename)
     if not os.path.exists(filepath):
@@ -122,6 +125,8 @@ def _load_local_json(filename: str) -> List[Dict[str, Any]]:
     return data
 
 def _save_local_json(filename: str, data: List[Dict[str, Any]]):
+    if settings.app_env not in ("development", "test"):
+        raise RuntimeError(f"Local file fallback write forbidden in environment: {settings.app_env}")
     os.makedirs(LOCAL_CRM_DIR, exist_ok=True)
     filepath = os.path.join(LOCAL_CRM_DIR, filename)
     with open(filepath, "w") as f:

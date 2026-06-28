@@ -11,11 +11,16 @@ import {
   Minus,
   Calendar,
   User,
+  Trash2,
+  AlertCircle,
+  ChevronDown
 } from "lucide-react";
 import { useCRMStore, type Deal, type PipelineStage } from "../store";
+import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 // ====================================================
-// MOCK DATA
+// MOCK DATA FALLBACK
 // ====================================================
 function generateMockPipeline(): PipelineStage[] {
   const stages: PipelineStage[] = [
@@ -74,27 +79,48 @@ const stageColors: Record<string, string> = {
 // ====================================================
 // DEAL CARD
 // ====================================================
-function DealCard({ deal, onDragStart }: { deal: Deal; onDragStart: (e: React.DragEvent, dealId: string, stageId: string) => void }) {
+function DealCard({
+  deal,
+  onDragStart,
+  onDelete
+}: {
+  deal: Deal;
+  onDragStart: (e: React.DragEvent, dealId: string, stageId: string) => void;
+  onDelete: (dealId: string) => void;
+}) {
   return (
     <div
       draggable
       onDragStart={(e) => onDragStart(e, deal.id, deal.stage_id)}
-      className="rounded-lg p-3 border cursor-grab active:cursor-grabbing transition-all hover:scale-[1.01] hover:shadow-lg"
+      className="group rounded-lg p-3 border cursor-grab active:cursor-grabbing transition-all hover:scale-[1.01] hover:shadow-lg relative"
       style={{
         background: "hsl(var(--surface-2))",
         borderColor: "hsl(var(--border-subtle))",
       }}
     >
       <div className="flex items-start justify-between mb-2">
-        <p className="text-[13px] font-medium leading-tight" style={{ color: "hsl(var(--text-primary))" }}>
+        <p className="text-[13px] font-medium leading-tight pr-6" style={{ color: "hsl(var(--text-primary))" }}>
           {deal.title}
         </p>
-        <SentimentIcon sentiment={deal.ai_sentiment} />
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <SentimentIcon sentiment={deal.ai_sentiment} />
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(deal.id);
+            }}
+            className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-white/10"
+            style={{ color: "#ef4444" }}
+            title="Delete Deal"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
       <div className="flex items-center gap-1.5 mb-2">
         <User className="w-3 h-3" style={{ color: "hsl(var(--text-muted))" }} />
         <span className="text-[11px]" style={{ color: "hsl(var(--text-secondary))" }}>
-          {deal.contact_name}
+          {deal.contact_name || "No Contact"}
         </span>
       </div>
       <div className="flex items-center justify-between">
@@ -119,11 +145,13 @@ function KanbanColumn({
   onDragStart,
   onDragOver,
   onDrop,
+  onDeleteDeal
 }: {
   stage: PipelineStage;
   onDragStart: (e: React.DragEvent, dealId: string, stageId: string) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, stageId: string) => void;
+  onDeleteDeal: (dealId: string) => void;
 }) {
   const color = stageColors[stage.name] || "#6b7280";
   const totalValue = stage.deals.reduce((s, d) => s + d.value_usd, 0);
@@ -157,7 +185,7 @@ function KanbanColumn({
       {/* Cards */}
       <div className="flex-1 p-3 space-y-2 overflow-y-auto max-h-[calc(100vh-260px)]">
         {stage.deals.map((deal) => (
-          <DealCard key={deal.id} deal={deal} onDragStart={onDragStart} />
+          <DealCard key={deal.id} deal={deal} onDragStart={onDragStart} onDelete={onDeleteDeal} />
         ))}
         {stage.deals.length === 0 && (
           <div className="py-8 text-center">
@@ -173,14 +201,75 @@ function KanbanColumn({
 // PIPELINE PAGE
 // ====================================================
 export default function PipelinePage() {
-  const { stages, setStages, moveDeal } = useCRMStore();
+  const { stages, setStages, moveDeal, addDeal, removeDeal, contacts, setContacts } = useCRMStore();
   const [mounted, setMounted] = useState(false);
   const [dragInfo, setDragInfo] = useState<{ dealId: string; fromStageId: string } | null>(null);
 
+  // Modal & Form States
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState("");
+  const [selectedStageId, setSelectedStageId] = useState("");
+  const [newDealValue, setNewDealValue] = useState("5000");
+  const [newSentiment, setNewSentiment] = useState<"positive" | "neutral" | "negative" | "unknown">("unknown");
+  const [newNextAction, setNewNextAction] = useState("");
+
+  const fetchContactsAndPipeline = async () => {
+    try {
+      // 1. Fetch contacts first to get the name/company detail mapping
+      const contactsRes = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
+        headers: getAuthHeaders()
+      });
+      let contactsList = [];
+      if (contactsRes.ok) {
+        contactsList = await contactsRes.json();
+        setContacts(contactsList);
+      }
+
+      // 2. Fetch pipeline stage deals
+      const pipelineRes = await fetch(`${BACKEND_URL}/api/v1/crm/pipeline`, {
+        headers: getAuthHeaders()
+      });
+      if (pipelineRes.ok) {
+        const data = await pipelineRes.json();
+        const mapped = data.map((s: any) => ({
+          id: String(s.stage_id),
+          name: s.stage_name,
+          position: s.position,
+          probability_pct: s.probability_pct ?? 50,
+          is_terminal: s.is_terminal ?? false,
+          deals: (s.deals || []).map((d: any) => {
+            const contact = contactsList.find((c: any) => c.id === d.contact_id);
+            return {
+              id: String(d.id),
+              tenant_id: d.tenant_id,
+              contact_id: String(d.contact_id || ""),
+              contact_name: contact ? contact.full_name : "Unknown Contact",
+              company_name: contact ? contact.company_name : "Unknown Company",
+              stage_id: String(d.stage_id),
+              stage_name: s.stage_name,
+              title: d.title,
+              value_usd: d.value_usd,
+              currency: d.currency || "USD",
+              close_date: d.close_date,
+              ai_sentiment: d.ai_sentiment || "unknown",
+              ai_next_action: d.ai_next_action,
+              last_activity_date: d.updated_at || d.created_at,
+              created_at: d.created_at,
+            };
+          }),
+        }));
+        setStages(mapped);
+      }
+    } catch (err) {
+      console.warn("Failed to load pipeline dynamically:", err);
+    }
+  };
+
   useEffect(() => {
     setMounted(true);
-    if (stages.length === 0) setStages(generateMockPipeline());
-  }, [stages.length, setStages]);
+    fetchContactsAndPipeline();
+  }, [setStages, setContacts]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, dealId: string, stageId: string) => {
@@ -196,15 +285,117 @@ export default function PipelinePage() {
   }, []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent, toStageId: string) => {
+    async (e: React.DragEvent, toStageId: string) => {
       e.preventDefault();
       if (dragInfo && dragInfo.fromStageId !== toStageId) {
         moveDeal(dragInfo.dealId, dragInfo.fromStageId, toStageId);
+        
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/v1/crm/deals/${dragInfo.dealId}`, {
+            method: "PUT",
+            headers: {
+              ...getAuthHeaders(),
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              stage_id: toStageId
+            })
+          });
+          if (!res.ok) {
+            console.error("Failed to persist deal stage change to backend");
+          }
+        } catch (err) {
+          console.warn("Failed to communicate deal stage change to backend:", err);
+        }
       }
       setDragInfo(null);
     },
     [dragInfo, moveDeal]
   );
+
+  const openAddDealModal = () => {
+    if (contacts.length > 0) {
+      setSelectedContactId(contacts[0].id);
+    } else {
+      setSelectedContactId("");
+    }
+    if (stages.length > 0) {
+      setSelectedStageId(stages[0].id);
+    } else {
+      setSelectedStageId("");
+    }
+    setShowAddModal(true);
+  };
+
+  const handleAddDealSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !selectedContactId || !selectedStageId) {
+      alert("Deal Title, Associated Contact, and Stage are required.");
+      return;
+    }
+
+    const stage = stages.find((s) => s.id === selectedStageId);
+    const contact = contacts.find((c) => c.id === selectedContactId);
+
+    const payload = {
+      tenant_id: "acme_tenant",
+      contact_id: selectedContactId,
+      stage_id: selectedStageId,
+      title: newTitle.trim(),
+      value_usd: parseFloat(newDealValue) || 0,
+      currency: "USD",
+      ai_sentiment: newSentiment,
+      ai_next_action: newNextAction.trim() || undefined,
+    };
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/deals`, {
+        method: "POST",
+        headers: {
+          ...getAuthHeaders(),
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const savedDeal = await res.json();
+        addDeal({
+          ...savedDeal,
+          contact_name: contact ? contact.full_name : "Unknown",
+          company_name: contact ? contact.company_name : "Independent",
+          stage_name: stage ? stage.name : "New Lead"
+        });
+      } else {
+        console.error("Backend failed to save deal");
+      }
+    } catch (err) {
+      console.warn("Failed to contact backend:", err);
+    }
+
+    // Reset
+    setNewTitle("");
+    setNewDealValue("5000");
+    setNewNextAction("");
+    setNewSentiment("unknown");
+    setShowAddModal(false);
+  };
+
+  const handleDeleteDeal = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this deal?")) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/deals/${id}`, {
+        method: "DELETE",
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        removeDeal(id);
+      } else {
+        console.error("Failed to delete deal on backend");
+      }
+    } catch (err) {
+      console.warn("Failed to reach backend:", err);
+    }
+  };
 
   if (!mounted) return null;
 
@@ -227,6 +418,7 @@ export default function PipelinePage() {
           </p>
         </div>
         <button
+          onClick={openAddDealModal}
           className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white"
           style={{ background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))" }}
         >
@@ -243,9 +435,204 @@ export default function PipelinePage() {
             onDragStart={handleDragStart}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
+            onDeleteDeal={handleDeleteDeal}
           />
         ))}
       </div>
+
+      {/* Add Deal Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div
+            className="w-full max-w-md rounded-xl border p-6 space-y-4 shadow-2xl relative"
+            style={{
+              background: "hsl(var(--surface-1))",
+              borderColor: "hsl(var(--border-subtle))",
+            }}
+          >
+            <button
+              onClick={() => setShowAddModal(false)}
+              className="absolute right-4 top-4 p-1.5 rounded-lg transition-colors hover:bg-white/5"
+              style={{ color: "hsl(var(--text-muted))" }}
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            <div>
+              <h2 className="text-lg font-bold" style={{ color: "hsl(var(--text-primary))" }}>Add Pipeline Deal</h2>
+              <p className="text-xs" style={{ color: "hsl(var(--text-muted))" }}>Log a new active deal and associate it with a contact.</p>
+            </div>
+
+            {contacts.length === 0 ? (
+              <div
+                className="flex items-start gap-2.5 p-3 rounded-lg border text-xs"
+                style={{
+                  background: "hsla(38, 92%, 50%, 0.05)",
+                  borderColor: "hsla(38, 92%, 50%, 0.2)",
+                  color: "#f59e0b"
+                }}
+              >
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold">No contacts available</p>
+                  <p className="mt-0.5">Please add a Contact in the Contacts directory before creating a pipeline deal.</p>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleAddDealSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>Deal Title *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Wayne Security Suite Upgrade"
+                    value={newTitle}
+                    onChange={(e) => setNewTitle(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none transition-colors"
+                    style={{
+                      background: "hsl(var(--surface-2))",
+                      borderColor: "hsl(var(--border-subtle))",
+                      color: "hsl(var(--text-primary))",
+                    }}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>Associated Contact *</label>
+                  <div className="relative">
+                    <select
+                      value={selectedContactId}
+                      onChange={(e) => setSelectedContactId(e.target.value)}
+                      className="w-full pl-3 pr-8 py-2 rounded-lg text-sm border outline-none transition-colors cursor-pointer appearance-none"
+                      style={{
+                        background: "hsl(var(--surface-2))",
+                        borderColor: "hsl(var(--border-subtle))",
+                        color: "hsl(var(--text-primary))",
+                      }}
+                    >
+                      {contacts.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.full_name} ({c.company_name || "Independent"})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-xs flex items-center" style={{ color: "hsl(var(--text-muted))" }}>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>Pipeline Stage *</label>
+                  <div className="relative">
+                    <select
+                      value={selectedStageId}
+                      onChange={(e) => setSelectedStageId(e.target.value)}
+                      className="w-full pl-3 pr-8 py-2 rounded-lg text-sm border outline-none transition-colors cursor-pointer appearance-none"
+                      style={{
+                        background: "hsl(var(--surface-2))",
+                        borderColor: "hsl(var(--border-subtle))",
+                        color: "hsl(var(--text-primary))",
+                      }}
+                    >
+                      {stages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-xs flex items-center" style={{ color: "hsl(var(--text-muted))" }}>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>Value USD ($)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={newDealValue}
+                      onChange={(e) => setNewDealValue(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg text-sm border outline-none transition-colors text-center"
+                      style={{
+                        background: "hsl(var(--surface-2))",
+                        borderColor: "hsl(var(--border-subtle))",
+                        color: "hsl(var(--text-primary))",
+                      }}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>AI Sentiment</label>
+                    <div className="relative">
+                      <select
+                        value={newSentiment}
+                        onChange={(e) => setNewSentiment(e.target.value as any)}
+                        className="w-full pl-3 pr-8 py-2 rounded-lg text-sm border outline-none transition-colors cursor-pointer appearance-none capitalize text-center"
+                        style={{
+                          background: "hsl(var(--surface-2))",
+                          borderColor: "hsl(var(--border-subtle))",
+                          color: "hsl(var(--text-primary))",
+                        }}
+                      >
+                        <option value="unknown">Unknown</option>
+                        <option value="positive">Positive</option>
+                        <option value="neutral">Neutral</option>
+                        <option value="negative">Negative</option>
+                      </select>
+                      <div className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-xs flex items-center" style={{ color: "hsl(var(--text-muted))" }}>
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold" style={{ color: "hsl(var(--text-secondary))" }}>Next Action Summary</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Schedule calendar meeting"
+                    value={newNextAction}
+                    onChange={(e) => setNewNextAction(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none transition-colors"
+                    style={{
+                      background: "hsl(var(--surface-2))",
+                      borderColor: "hsl(var(--border-subtle))",
+                      color: "hsl(var(--text-primary))",
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold border transition-colors"
+                    style={{
+                      borderColor: "hsl(var(--border-default))",
+                      color: "hsl(var(--text-secondary))",
+                      background: "transparent",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white transition-colors"
+                    style={{
+                      background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))",
+                    }}
+                  >
+                    Save Deal
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

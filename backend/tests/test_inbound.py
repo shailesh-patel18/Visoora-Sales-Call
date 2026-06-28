@@ -74,7 +74,7 @@ def test_twilio_inbound_webhook():
     assert "<Say" in content
     assert "<Connect>" in content
     assert '<Stream url="ws' in content
-    assert "caller_phone=+15005550006" in content
+    assert "caller_phone=%2B15005550006" in content
     assert "<Pause length=" in content
 
 

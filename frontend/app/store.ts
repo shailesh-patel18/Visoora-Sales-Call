@@ -118,14 +118,15 @@ interface CRMStore {
   setStages: (stages: PipelineStage[]) => void;
   moveDeal: (dealId: string, fromStageId: string, toStageId: string) => void;
   addDeal: (deal: Deal) => void;
+  removeDeal: (dealId: string) => void;
 
   // Live Calls
   liveCalls: LiveCall[];
-  setLiveCalls: (calls: LiveCall[]) => void;
+  setLiveCalls: (calls: LiveCall[] | ((prev: LiveCall[]) => LiveCall[])) => void;
 
   // Activity Feed
   activities: ActivityEvent[];
-  setActivities: (events: ActivityEvent[]) => void;
+  setActivities: (events: ActivityEvent[] | ((prev: ActivityEvent[]) => ActivityEvent[])) => void;
 
   // Call Logs
   callLogs: CallLog[];
@@ -138,6 +139,9 @@ interface CRMStore {
   // UI
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
+  mobileSidebarOpen: boolean;
+  toggleMobileSidebar: () => void;
+  setMobileSidebarOpen: (open: boolean) => void;
 }
 
 export const useCRMStore = create<CRMStore>((set) => ({
@@ -183,14 +187,27 @@ export const useCRMStore = create<CRMStore>((set) => ({
           : stage
       ),
     })),
+  removeDeal: (dealId) =>
+    set((s) => ({
+      stages: s.stages.map((stage) => ({
+        ...stage,
+        deals: stage.deals.filter((d) => d.id !== dealId),
+      })),
+    })),
 
   // Live Calls
   liveCalls: [],
-  setLiveCalls: (calls) => set({ liveCalls: calls }),
+  setLiveCalls: (calls) =>
+    set((s) => ({
+      liveCalls: typeof calls === "function" ? calls(s.liveCalls) : calls,
+    })),
 
   // Activity Feed
   activities: [],
-  setActivities: (events) => set({ activities: events }),
+  setActivities: (events) =>
+    set((s) => ({
+      activities: typeof events === "function" ? events(s.activities) : events,
+    })),
 
   // Call Logs
   callLogs: [],
@@ -211,4 +228,7 @@ export const useCRMStore = create<CRMStore>((set) => ({
   // UI
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+  mobileSidebarOpen: false,
+  toggleMobileSidebar: () => set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen })),
+  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
 }));
