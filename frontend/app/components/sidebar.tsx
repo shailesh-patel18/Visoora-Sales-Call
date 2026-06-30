@@ -20,6 +20,7 @@ import {
   Target,
   Radio,
   LogOut,
+  Mail,
 } from "lucide-react";
 import { useCRMStore } from "../store";
 import { useAuthStore } from "../auth/store";
@@ -36,6 +37,7 @@ const navItems = [
   { href: "/pipeline", label: "Pipeline", icon: Kanban },
   { href: "/calls", label: "Calls", icon: Phone },
   { href: "/settings/compliance", label: "Compliance", icon: Shield },
+  { href: "/settings/email", label: "Email Accounts", icon: Mail },
   { href: "/settings/billing", label: "Billing", icon: CreditCard },
 ];
 

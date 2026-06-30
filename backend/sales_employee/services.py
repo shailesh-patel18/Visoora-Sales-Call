@@ -147,6 +147,17 @@ class LocalStore:
         "leads": "sales_leads.json",
         "interaction_history": "interaction_history.json",
         "outreach_decisions": "outreach_decisions.json",
+        "mailboxes": "connected_mailboxes.json",
+        "mailbox_verifications": "mailbox_verifications.json",
+        "email_threads": "email_threads.json",
+        "followup_plans": "followup_plans.json",
+        "delivery_events": "delivery_events.json",
+        "open_events": "open_events.json",
+        "reply_events": "reply_events.json",
+        "timeline_events": "timeline_events.json",
+        "reasoning_logs": "reasoning_logs.json",
+        "communication_history": "communication_history.json",
+        "next_scheduled_decisions": "next_scheduled_decisions.json",
     }
 
     def list(self, table: str, tenant_id: str, **filters: Any) -> List[Dict[str, Any]]:

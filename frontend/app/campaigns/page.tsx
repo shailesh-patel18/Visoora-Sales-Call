@@ -2,8 +2,24 @@
 
 import React, { useState, useEffect } from "react";
 import {
-  Plus, Search, Building2, Mail, Phone, ShieldAlert, Sparkles, Play,
-  Send, History, User, Clock, ArrowRight, AlertCircle, CheckCircle2, Bot
+  Plus,
+  Search,
+  Building2,
+  Mail,
+  Phone,
+  ShieldAlert,
+  Sparkles,
+  Play,
+  Send,
+  History,
+  User,
+  Clock,
+  ArrowRight,
+  AlertCircle,
+  CheckCircle2,
+  Bot,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { BACKEND_URL } from "../config";
 
@@ -44,13 +60,13 @@ export default function CampaignsPage() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  
+
   // Selection details
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [decision, setDecision] = useState<any>(null);
-  const [draft, setDraft] = useState<any>(null);
-  
+  const [reasoningText, setReasoningText] = useState<string | null>(null);
+
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [name, setName] = useState("");
@@ -59,19 +75,18 @@ export default function CampaignsPage() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [assignedAgentId, setAssignedAgentId] = useState("");
-  
-  // Actions loading states
+
+  // Loading states
   const [isIngesting, setIsIngesting] = useState(false);
   const [isDeciding, setIsDeciding] = useState(false);
-  const [isDrafting, setIsDrafting] = useState(false);
-  const [isSending, setIsSending] = useState(false);
+  const [isExecuting, setIsExecuting] = useState(false);
   const [isCalling, setIsCalling] = useState(false);
   const [callSuccess, setCallSuccess] = useState<string | null>(null);
 
   const fetchLeads = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: { "X-Tenant-ID": "acme_tenant" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -88,7 +103,7 @@ export default function CampaignsPage() {
   const fetchAgents = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: { "X-Tenant-ID": "acme_tenant" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -107,13 +122,13 @@ export default function CampaignsPage() {
     if (!lead) return;
     setSelectedLead(lead);
     setDecision(null);
-    setDraft(null);
+    setReasoningText(null);
     setCallSuccess(null);
 
     // Fetch timeline
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${id}/timeline`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: { "X-Tenant-ID": "acme_tenant" },
       });
       if (res.ok) {
         const data = await res.json();
@@ -130,7 +145,6 @@ export default function CampaignsPage() {
     fetchAgents();
   }, []);
 
-  // Update lead details when leads list or selected ID shifts
   useEffect(() => {
     if (selectedLeadId && leads.length > 0) {
       fetchLeadDetails(selectedLeadId);
@@ -157,16 +171,15 @@ export default function CampaignsPage() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "X-Tenant-ID": "acme_tenant"
+          "X-Tenant-ID": "acme_tenant",
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const newLead = await res.json();
         setLeads([newLead, ...leads]);
         setSelectedLeadId(newLead.id);
         setShowAddModal(false);
-        // Clear inputs
         setName("");
         setCompany("");
         setWebsite("");
@@ -183,17 +196,19 @@ export default function CampaignsPage() {
     setIsIngesting(false);
   };
 
-  const handleDecide = async () => {
+  // Run AI Decision reasoning
+  const handleAnalyze = async () => {
     if (!selectedLeadId) return;
     setIsDeciding(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${selectedLeadId}/decide`, {
         method: "POST",
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: { "X-Tenant-ID": "acme_tenant" },
       });
       if (res.ok) {
         const data = await res.json();
         setDecision(data);
+        setReasoningText(data.reason);
       }
     } catch (err) {
       console.error(err);
@@ -201,43 +216,45 @@ export default function CampaignsPage() {
     setIsDeciding(false);
   };
 
-  const handleDraft = async () => {
+  // Execute AI action autonomously
+  const handleExecute = async () => {
     if (!selectedLeadId) return;
-    setIsDrafting(true);
+    setIsExecuting(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${selectedLeadId}/emails/draft`, {
+      // 1. Analyze and decide
+      const decideRes = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${selectedLeadId}/decide`, {
         method: "POST",
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: { "X-Tenant-ID": "acme_tenant" },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setDraft(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-    setIsDrafting(false);
-  };
+      if (!decideRes.ok) throw new Error("AI analysis failed.");
+      const nextDecision = await decideRes.json();
+      setDecision(nextDecision);
+      setReasoningText(nextDecision.reason);
 
-  const handleSendEmail = async () => {
-    if (!selectedLeadId) return;
-    setIsSending(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${selectedLeadId}/emails/send`, {
-        method: "POST",
-        headers: { "X-Tenant-ID": "acme_tenant" }
-      });
-      if (res.ok) {
-        alert("Email sent successfully!");
-        fetchLeadDetails(selectedLeadId);
+      if (nextDecision.action === "send_email" || nextDecision.should_send) {
+        // Send email automatically
+        const sendRes = await fetch(`${BACKEND_URL}/api/v1/sales-employee/leads/${selectedLeadId}/emails/send`, {
+          method: "POST",
+          headers: { "X-Tenant-ID": "acme_tenant" },
+        });
+        if (sendRes.ok) {
+          alert("AI outbound email sent successfully!");
+          fetchLeadDetails(selectedLeadId);
+        } else {
+          const err = await sendRes.json();
+          alert(`Email dispatch failed: ${err.detail}`);
+        }
+      } else if (nextDecision.action === "call") {
+        // AI recommends phone call next
+        handleCall();
       } else {
-        const err = await res.json();
-        alert(`Error: ${err.detail || "Failed to send email"}`);
+        alert(`AI next action: ${nextDecision.action}. Reasoning: ${nextDecision.reason}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      alert(`Strategy execution error: ${err.message}`);
     }
-    setIsSending(false);
+    setIsExecuting(false);
   };
 
   const handleCall = async () => {
@@ -251,14 +268,16 @@ export default function CampaignsPage() {
         body: JSON.stringify({
           phone: selectedLead.phone,
           name: selectedLead.name,
-          company: selectedLead.company_name
-        })
+          company: selectedLead.company_name,
+        }),
       });
       if (res.ok) {
         const data = await res.json();
         setCallSuccess(`Call initiated! SID: ${data.call_sid}`);
+        // Refresh timeline
+        setTimeout(() => fetchLeadDetails(selectedLead.id), 2000);
       } else {
-        alert("Failed to initiate Twilio call.");
+        alert("Failed to initiate outbound call.");
       }
     } catch (err) {
       console.error(err);
@@ -266,16 +285,36 @@ export default function CampaignsPage() {
     setIsCalling(false);
   };
 
+  // Simulating events via helper webhooks for QA verification
+  const triggerQAEvent = async (eventType: string) => {
+    if (!selectedLeadId) return;
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/v1/sales-employee/webhooks/mailbox/test-event?lead_id=${selectedLeadId}&event_type=${eventType}`,
+        {
+          method: "POST",
+          headers: { "X-Tenant-ID": "acme_tenant" },
+        }
+      );
+      if (res.ok) {
+        alert(`Simulated inbound ${eventType} registered!`);
+        fetchLeadDetails(selectedLeadId);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (!mounted) return null;
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1440px] mx-auto">
+    <div className="p-6 lg:p-8 space-y-6 max-w-[1440px] mx-auto text-white">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">Campaign & Leads Console</h1>
-          <p className="text-sm mt-0.5 text-[hsl(var(--text-muted))]">
-            Import leads, view RAG grounding briefs, and govern autonomous multi-channel strategy execution.
+          <h1 className="text-2xl font-bold tracking-tight text-white">AI outreach Command center</h1>
+          <p className="text-sm mt-0.5 text-neutral-400">
+            Import leads, view company briefs, audit strategy recommendations, and manage the intelligent follow-up lifecycle.
           </p>
         </div>
         <button
@@ -288,73 +327,69 @@ export default function CampaignsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Leads Column (Left) */}
-        <div className="lg:col-span-1 rounded-xl border p-5 flex flex-col gap-4" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
-          <h2 className="text-sm font-semibold text-white">Ingested Leads</h2>
+        {/* Leads List */}
+        <div className="lg:col-span-1 rounded-xl border border-neutral-800 p-5 bg-neutral-950 flex flex-col gap-4">
+          <h2 className="text-sm font-semibold text-white flex items-center gap-1.5">
+            <UsersIcon className="w-4 h-4 text-neutral-400" /> Ingested Leads
+          </h2>
           <div className="space-y-3 max-h-[600px] overflow-y-auto">
             {leads.length === 0 ? (
-              <p className="text-xs text-[hsl(var(--text-muted))]">No leads imported yet.</p>
+              <p className="text-xs text-neutral-500">No leads imported yet.</p>
             ) : (
               leads.map((l) => (
                 <div
                   key={l.id}
                   onClick={() => setSelectedLeadId(l.id)}
                   className={`p-4 rounded-xl border cursor-pointer transition-all hover:bg-white/[0.01] flex justify-between items-center ${
-                    selectedLeadId === l.id ? "ring-1" : ""
+                    selectedLeadId === l.id ? "border-[hsl(var(--brand-primary))] bg-neutral-900" : "border-neutral-800 bg-neutral-900/40"
                   }`}
-                  style={{
-                    background: selectedLeadId === l.id ? "hsl(var(--surface-2))" : "hsl(var(--surface-2))",
-                    borderColor: selectedLeadId === l.id ? "hsl(var(--brand-primary))" : "hsl(var(--border-subtle))",
-                  }}
                 >
                   <div>
                     <h3 className="text-xs font-bold text-white">{l.name}</h3>
-                    <p className="text-[10px] text-[hsl(var(--text-muted))] mt-0.5">{l.company_name}</p>
+                    <p className="text-[10px] text-neutral-400 mt-0.5">{l.company_name}</p>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <span
-                      className="text-[9px] font-bold px-2 py-0.5 rounded-full"
-                      style={{
-                        background: l.needs_review ? "hsla(0, 100%, 50%, 0.1)" : "hsla(142, 71%, 45%, 0.1)",
-                        color: l.needs_review ? "#ef4444" : "#22c55e",
-                      }}
-                    >
-                      {l.needs_review ? "Needs Review" : `Conf: ${l.research_confidence}`}
-                    </span>
-                  </div>
+                  <span
+                    className="text-[9px] font-bold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: l.needs_review ? "rgba(239, 68, 68, 0.1)" : "rgba(34, 197, 94, 0.1)",
+                      color: l.needs_review ? "#ef4444" : "#22c55e",
+                    }}
+                  >
+                    {l.needs_review ? "Needs Review" : `Conf: ${l.research_confidence}`}
+                  </span>
                 </div>
               ))
             )}
           </div>
         </div>
 
-        {/* Lead Details Column (Right 2) */}
-        <div className="lg:col-span-2 flex flex-col gap-6">
+        {/* Lead View and AI Panel */}
+        <div className="lg:col-span-2 space-y-6">
           {selectedLead ? (
             <>
-              {/* Profile details */}
-              <div className="rounded-xl border p-6 flex flex-col gap-4" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
-                <div className="flex justify-between items-center pb-3 border-b" style={{ borderColor: "hsl(var(--border-subtle))" }}>
+              {/* Profile Details & Research Brief */}
+              <div className="rounded-xl border border-neutral-800 p-6 bg-neutral-950 flex flex-col gap-4">
+                <div className="flex justify-between items-center pb-3 border-b border-neutral-800">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-[hsla(var(--brand-primary),0.1)] flex items-center justify-center">
-                      <User className="w-5 h-5 text-[hsl(var(--brand-primary))]" />
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400">
+                      <User className="w-5 h-5" />
                     </div>
                     <div>
                       <h2 className="text-sm font-bold text-white">{selectedLead.name}</h2>
-                      <p className="text-[11px] text-[hsl(var(--text-muted))]">{selectedLead.company_name}</p>
+                      <p className="text-[11px] text-neutral-400">{selectedLead.company_name}</p>
                     </div>
                   </div>
                   <div className="flex gap-2">
                     <a
                       href={`mailto:${selectedLead.email}`}
-                      className="p-2 rounded bg-[hsl(var(--surface-3))] text-[hsl(var(--text-secondary))] hover:text-white"
+                      className="p-2 rounded bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
                       title={selectedLead.email}
                     >
                       <Mail className="w-4 h-4" />
                     </a>
                     <a
                       href={`tel:${selectedLead.phone}`}
-                      className="p-2 rounded bg-[hsl(var(--surface-3))] text-[hsl(var(--text-secondary))] hover:text-white"
+                      className="p-2 rounded bg-neutral-900 border border-neutral-800 text-neutral-400 hover:text-white"
                       title={selectedLead.phone}
                     >
                       <Phone className="w-4 h-4" />
@@ -362,35 +397,20 @@ export default function CampaignsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 text-xs">
-                  <div>
-                    <span className="text-[10px] text-neutral-400 font-semibold uppercase">Website</span>
-                    <p className="text-white font-medium mt-0.5">{selectedLead.website}</p>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-neutral-400 font-semibold uppercase">Assigned Agent</span>
-                    <p className="text-white font-medium mt-0.5">
-                      {agents.find((a) => a.id === selectedLead.agent_id)?.name || "Unknown"}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Research brief details */}
                 {selectedLead.research_brief && (
-                  <div className="rounded-lg p-4 mt-2" style={{ background: "hsl(var(--surface-2))" }}>
-                    <div className="flex items-center gap-1.5 mb-2">
-                      <Sparkles className="w-4 h-4 text-emerald-400" />
-                      <h3 className="text-xs font-bold text-white">Automated Web Research summary</h3>
+                  <div className="rounded-lg p-4 bg-neutral-900/60 border border-neutral-800">
+                    <div className="flex items-center gap-1.5 mb-2 text-emerald-400">
+                      <Sparkles className="w-4 h-4 animate-pulse" />
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-white">Research Grounding Brief</h3>
                     </div>
-                    
-                    <p className="text-xs text-[hsl(var(--text-secondary))] mb-3">
+                    <p className="text-xs text-neutral-300 leading-relaxed mb-4">
                       {selectedLead.research_brief.company_summary}
                     </p>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4 text-xs">
                       <div>
-                        <span className="text-[9px] font-bold text-neutral-400 uppercase">Likely Pain Points</span>
-                        <ul className="list-disc pl-4 text-[11px] text-white mt-1 space-y-0.5">
+                        <span className="text-[9px] font-bold text-neutral-400 uppercase">Target Pain Points</span>
+                        <ul className="list-disc pl-4 text-white mt-1 space-y-0.5">
                           {selectedLead.research_brief.likely_pain_points?.map((p) => (
                             <li key={p}>{p}</li>
                           ))}
@@ -398,86 +418,77 @@ export default function CampaignsPage() {
                       </div>
                       <div>
                         <span className="text-[9px] font-bold text-neutral-400 uppercase">Personalization hooks</span>
-                        <ul className="list-disc pl-4 text-[11px] text-white mt-1 space-y-0.5">
+                        <ul className="list-disc pl-4 text-white mt-1 space-y-0.5">
                           {selectedLead.research_brief.personalization_hooks?.map((p) => (
                             <li key={p}>{p}</li>
                           ))}
                         </ul>
                       </div>
                     </div>
-
-                    {selectedLead.research_brief.domain_mismatches && selectedLead.research_brief.domain_mismatches.length > 0 && (
-                      <div className="mt-3 flex items-start gap-1.5 text-[11px] text-amber-400 border border-amber-400/20 p-2.5 rounded bg-amber-400/5">
-                        <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                        <div>
-                          <p className="font-bold">Consistency Mismatches Warning</p>
-                          <ul className="list-disc pl-4 mt-0.5">
-                            {selectedLead.research_brief.domain_mismatches.map((m) => (
-                              <li key={m}>{m}</li>
-                            ))}
-                          </ul>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>
 
-              {/* Strategy Engine Actions */}
-              <div className="rounded-xl border p-6 flex flex-col gap-4" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
-                <h3 className="text-xs font-bold text-white uppercase tracking-wider">Outreach strategy engine</h3>
-                
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleDecide}
-                    disabled={isDeciding}
-                    className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-white bg-[hsl(var(--surface-3))] hover:bg-[hsl(var(--surface-4))] transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Bot className="w-3.5 h-3.5 text-[hsl(var(--brand-primary))]" />
-                    {isDeciding ? "Analyzing..." : "Analyze Next Step"}
-                  </button>
-
-                  <button
-                    onClick={handleDraft}
-                    disabled={isDrafting}
-                    className="flex-1 py-2.5 rounded-lg text-xs font-semibold text-white bg-[hsl(var(--surface-3))] hover:bg-[hsl(var(--surface-4))] transition-all flex items-center justify-center gap-1.5"
-                  >
-                    <Mail className="w-3.5 h-3.5 text-blue-400" />
-                    {isDrafting ? "Drafting..." : "Generate Email Draft"}
-                  </button>
+              {/* AI Outreach Strategy Engine */}
+              <div className="rounded-xl border border-neutral-800 p-6 bg-neutral-950 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">AI strategy decision engine</h3>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={isDeciding || isExecuting}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-white flex items-center gap-1.5"
+                    >
+                      <Bot className="w-3.5 h-3.5 text-blue-400" /> Analyze Strategy
+                    </button>
+                    <button
+                      onClick={handleExecute}
+                      disabled={isExecuting || isDeciding}
+                      className="px-4 py-1.5 rounded-lg text-xs font-bold text-white flex items-center gap-1.5"
+                      style={{ background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))" }}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {isExecuting ? "Executing Strategy..." : "Run AI Strategy Loop"}
+                    </button>
+                  </div>
                 </div>
 
-                {decision && (
-                  <div className="p-4 rounded-lg flex flex-col gap-2 bg-[hsla(var(--brand-primary),0.03)] border border-[hsla(var(--brand-primary),0.15)]">
+                {reasoningText && (
+                  <div className="p-4 rounded-lg bg-neutral-900 border border-neutral-800 space-y-2">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] uppercase font-bold text-[hsl(var(--brand-primary))]">Recommended Action:</span>
-                      <span className="text-xs font-bold text-white capitalize">{decision.action.replace(/_/g, " ")}</span>
+                      <span className="text-[10px] font-bold uppercase text-[hsl(var(--brand-primary))]">Next Recommended Action:</span>
+                      <span className="text-xs font-bold text-white capitalize">{decision?.action?.replace(/_/g, " ")}</span>
                     </div>
-                    <p className="text-xs text-[hsl(var(--text-secondary))]"><strong>Reasoning:</strong> {decision.reason}</p>
-                    
-                    {decision.should_send && (
-                      <button
-                        onClick={handleSendEmail}
-                        disabled={isSending}
-                        className="mt-2 py-2 rounded-lg text-xs font-semibold text-white bg-[hsl(var(--brand-primary))] flex items-center justify-center gap-1.5"
-                      >
-                        <Send className="w-3.5 h-3.5" />
-                        {isSending ? "Sending Outbound Email..." : "Authorize Email Dispatch"}
-                      </button>
-                    )}
+                    <p className="text-xs text-neutral-300"><strong>Explainable Reasoning:</strong> {reasoningText}</p>
                   </div>
                 )}
 
-                {draft && (
-                  <div className="p-4 rounded-lg bg-neutral-900 border text-xs space-y-3">
-                    <p className="text-neutral-400 font-bold">Email Subject: <span className="text-white font-normal">{draft.subject}</span></p>
-                    <div className="p-3 rounded bg-black/40 text-neutral-300 font-mono text-[11px] whitespace-pre-line leading-relaxed">
-                      {draft.body}
-                    </div>
+                {/* Simulated webhook tools for testing */}
+                <div className="border-t border-neutral-800 pt-4">
+                  <h4 className="text-[10px] uppercase font-bold text-neutral-400 tracking-wider mb-2">Simulate inbound signals (QA Verification)</h4>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => triggerQAEvent("open")}
+                      className="px-3 py-1.5 rounded bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 text-[11px] font-semibold"
+                    >
+                      Simulate Open Event
+                    </button>
+                    <button
+                      onClick={() => triggerQAEvent("reply")}
+                      className="px-3 py-1.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 text-[11px] font-semibold"
+                    >
+                      Simulate Inbound Reply
+                    </button>
+                    <button
+                      onClick={() => triggerQAEvent("bounce")}
+                      className="px-3 py-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 text-[11px] font-semibold"
+                    >
+                      Simulate Email Bounce
+                    </button>
                   </div>
-                )}
+                </div>
 
-                <div className="border-t pt-4 flex flex-col gap-3" style={{ borderColor: "hsl(var(--border-subtle))" }}>
+                <div className="border-t border-neutral-800 pt-4 flex flex-col gap-2">
                   <button
                     onClick={handleCall}
                     disabled={isCalling}
@@ -485,7 +496,7 @@ export default function CampaignsPage() {
                     style={{ background: "linear-gradient(135deg, #10b981, #059669)" }}
                   >
                     <Play className="w-3.5 h-3.5" />
-                    {isCalling ? "Dialing Lead..." : "Initiate Outbound Voice Call Now"}
+                    {isCalling ? "Dialing..." : "Manual Outbound Call"}
                   </button>
                   {callSuccess && (
                     <p className="text-center text-xs font-semibold text-emerald-400 mt-1">{callSuccess}</p>
@@ -493,29 +504,41 @@ export default function CampaignsPage() {
                 </div>
               </div>
 
-              {/* Timeline feed */}
-              <div className="rounded-xl border p-6 flex flex-col gap-4" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
+              {/* Communication Timeline */}
+              <div className="rounded-xl border border-neutral-800 p-6 bg-neutral-950 flex flex-col gap-4">
                 <div className="flex items-center gap-2 mb-1">
                   <History className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">Interaction timeline history</h3>
+                  <h3 className="text-xs font-bold text-white uppercase tracking-wider">Communication Timeline</h3>
                 </div>
 
                 <div className="space-y-4">
                   {timeline.length === 0 ? (
-                    <p className="text-xs text-[hsl(var(--text-muted))]">No interaction history registered for this lead.</p>
+                    <p className="text-xs text-neutral-500">No interaction history registered for this lead.</p>
                   ) : (
                     timeline.map((event) => (
-                      <div key={event.id} className="flex gap-3 relative pb-2">
-                        <div className="w-6 h-6 rounded-full bg-[hsl(var(--surface-3))] flex items-center justify-center flex-shrink-0 text-xs">
+                      <div key={event.id} className="flex gap-3 relative pb-2 border-b border-neutral-900 last:border-0">
+                        <div className="w-6 h-6 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center flex-shrink-0 text-xs">
                           {event.channel === "email" ? "✉️" : "📞"}
                         </div>
-                        <div className="text-xs">
-                          <p className="font-semibold text-white capitalize">
-                            {event.direction} {event.channel} Outreach {event.status}
-                          </p>
-                          <p className="text-[10px] text-[hsl(var(--text-muted))]">
-                            {new Date(event.created_at).toLocaleString()}
-                          </p>
+                        <div className="text-xs flex-1">
+                          <div className="flex justify-between items-center">
+                            <p className="font-semibold text-white capitalize">
+                              {event.direction} {event.channel} touchpoint {event.status}
+                            </p>
+                            <span className="text-[10px] text-neutral-500">
+                              {new Date(event.created_at).toLocaleString()}
+                            </span>
+                          </div>
+                          {event.metadata && event.metadata.draft && (
+                            <div className="mt-2 p-2 rounded bg-neutral-900 text-[10px] text-neutral-300 font-mono whitespace-pre-line leading-normal">
+                              {event.metadata.draft.body}
+                            </div>
+                          )}
+                          {event.metadata && event.metadata.reply_body && (
+                            <div className="mt-2 p-2 rounded bg-emerald-950/20 border border-emerald-950 text-[10px] text-emerald-300 font-mono whitespace-pre-line leading-normal">
+                              {event.metadata.reply_body}
+                            </div>
+                          )}
                         </div>
                       </div>
                     ))
@@ -524,8 +547,8 @@ export default function CampaignsPage() {
               </div>
             </>
           ) : (
-            <div className="rounded-xl border p-12 text-center" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
-              <p className="text-xs text-[hsl(var(--text-muted))]">Select a lead to audit research summary and trigger outreach.</p>
+            <div className="rounded-xl border border-neutral-800 p-12 text-center bg-neutral-950 text-neutral-400">
+              <p className="text-xs">Select a lead from the list to view target research brief and trigger outreach strategy.</p>
             </div>
           )}
         </div>
@@ -534,78 +557,73 @@ export default function CampaignsPage() {
       {/* Import Lead Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="w-full max-w-[480px] rounded-2xl border p-6 shadow-2xl" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
+          <div className="w-full max-w-[480px] rounded-2xl border p-6 shadow-2xl bg-neutral-950 border-neutral-800 text-xs text-white">
             <h2 className="text-lg font-bold text-white mb-4">Import Outbound Lead</h2>
             
-            <form onSubmit={handleAddSubmit} className="space-y-4 text-xs">
+            <form onSubmit={handleAddSubmit} className="space-y-4">
               <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5">
                   <span className="text-neutral-400">Full Name</span>
                   <input
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 rounded border outline-none"
-                    style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+                    className="w-full px-3 py-2 rounded border border-neutral-800 bg-neutral-900 text-white outline-none"
                   />
                 </div>
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5">
                   <span className="text-neutral-400">Company Name</span>
                   <input
                     type="text"
                     required
                     value={company}
                     onChange={(e) => setCompany(e.target.value)}
-                    className="w-full px-3 py-2 rounded border outline-none"
-                    style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+                    className="w-full px-3 py-2 rounded border border-neutral-800 bg-neutral-900 text-white outline-none"
                   />
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5">
                 <span className="text-neutral-400">Website URL (e.g. google.com)</span>
                 <input
                   type="text"
                   required
                   value={website}
                   onChange={(e) => setWebsite(e.target.value)}
-                  className="w-full px-3 py-2 rounded border outline-none"
-                  style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+                  className="w-full px-3 py-2 rounded border border-neutral-800 bg-neutral-900 text-white outline-none"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5">
                   <span className="text-neutral-400">Email Address</span>
                   <input
                     type="email"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-3 py-2 rounded border outline-none"
-                    style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+                    className="w-full px-3 py-2 rounded border border-neutral-800 bg-neutral-900 text-white outline-none"
                   />
                 </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-neutral-400">Phone (E.164 e.g. +9198244...)</span>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-neutral-400">Phone (E.164 format, e.g. +19195551234)</span>
                   <input
                     type="text"
                     required
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    className="w-full px-3 py-2 rounded border outline-none"
-                    style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-primary))" }}
+                    className="w-full px-3 py-2 rounded border border-neutral-800 bg-neutral-900 text-white outline-none"
                   />
                 </div>
               </div>
 
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5">
                 <span className="text-neutral-400">Assigned Agent (Sales Brain)</span>
                 <select
                   value={assignedAgentId}
                   onChange={(e) => setAssignedAgentId(e.target.value)}
-                  className="w-full bg-[hsl(var(--surface-2))] border border-[hsl(var(--border-default))] rounded py-2 px-3 outline-none"
+                  className="w-full bg-neutral-900 border border-neutral-800 rounded py-2 px-3 outline-none text-white font-medium"
                 >
                   {agents.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
@@ -617,7 +635,7 @@ export default function CampaignsPage() {
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 rounded border hover:bg-neutral-800 text-neutral-400"
+                  className="px-4 py-2 rounded border border-neutral-800 hover:bg-neutral-900 text-neutral-400"
                 >
                   Cancel
                 </button>
@@ -635,5 +653,27 @@ export default function CampaignsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function UsersIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
   );
 }
