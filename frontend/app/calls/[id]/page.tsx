@@ -58,16 +58,25 @@ function normaliseSpeaker(s: string): "AI" | "Prospect" {
 
 function normaliseTranscript(raw: TranscriptTurn[] | string | undefined): Array<{ speaker: "AI" | "Prospect"; text: string; timestamp: string }> {
   if (!raw) return [];
+  let parsed: TranscriptTurn[] | undefined;
   if (typeof raw === "string") {
     try {
-      raw = JSON.parse(raw);
+      const result = JSON.parse(raw);
+      if (Array.isArray(result)) {
+        parsed = result;
+      } else {
+        return [{ speaker: "Prospect", text: raw, timestamp: "" }];
+      }
     } catch {
       // If it's a plain text blob, wrap it as a single Prospect turn
       return [{ speaker: "Prospect", text: raw, timestamp: "" }];
     }
+  } else if (Array.isArray(raw)) {
+    parsed = raw;
   }
-  if (!Array.isArray(raw)) return [];
-  return raw.map((t, i) => ({
+
+  if (!parsed) return [];
+  return parsed.map((t, i) => ({
     speaker: normaliseSpeaker(t.speaker as string),
     text: t.text || "",
     timestamp: t.timestamp ?? `00:${String(i * 3).padStart(2, "0")}`,

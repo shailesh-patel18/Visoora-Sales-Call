@@ -10,9 +10,10 @@ logger = structlog.get_logger("visoora_billing")
 
 load_dotenv()
 
-# Initialize Stripe Client
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_51Pmocked_secret_key_visoora")
-stripe.api_key = STRIPE_SECRET_KEY
+def get_stripe_key() -> str:
+    key = os.getenv("STRIPE_SECRET_KEY", "sk_test_51Pmocked_secret_key_visoora")
+    stripe.api_key = key
+    return key
 
 if not hasattr(stripe, "StripeClient"):
     class _StripeClientCompat:
@@ -53,7 +54,7 @@ def create_stripe_customer(tenant_id: str, email: str, name: str) -> str:
     logger.info("stripe_customer_create_start", tenant_id=tenant_id, email=email)
     
     # Mock fallback for test environment
-    if STRIPE_SECRET_KEY.startswith("sk_test_51Pmocked"):
+    if get_stripe_key().startswith("sk_test_51Pmocked"):
         logger.warn("stripe_mock_mode_active", action="create_customer")
         return f"cus_mocked_{tenant_id}"
 
@@ -78,7 +79,7 @@ def create_stripe_subscription(customer_id: str, plan: str) -> str:
     """
     logger.info("stripe_sub_create_start", customer_id=customer_id, plan=plan)
 
-    if customer_id.startswith("cus_mocked_") or STRIPE_SECRET_KEY.startswith("sk_test_51Pmocked"):
+    if customer_id.startswith("cus_mocked_") or get_stripe_key().startswith("sk_test_51Pmocked"):
         logger.warn("stripe_mock_mode_active", action="create_subscription")
         return f"sub_mocked_{plan}_{customer_id[-8:]}"
 
@@ -107,7 +108,8 @@ def report_minute_usage(subscription_id: str, minutes_to_add: float) -> bool:
     """
     logger.info("stripe_usage_report_start", subscription_id=subscription_id, minutes=minutes_to_add)
     
-    if subscription_id.startswith("sub_mocked_") or STRIPE_SECRET_KEY.startswith("sk_test_51Pmocked"):
+    key = get_stripe_key()
+    if subscription_id.startswith("sub_mocked_") or key.startswith("sk_test_51Pmocked"):
         logger.warn("stripe_mock_mode_active", action="report_usage")
         return True
 
@@ -124,7 +126,7 @@ def report_minute_usage(subscription_id: str, minutes_to_add: float) -> bool:
         
         # 2. Report Usage Record (rounds minutes to ceiling integer)
         quantity = math.ceil(minutes_to_add)
-        client = stripe.StripeClient(STRIPE_SECRET_KEY)
+        client = stripe.StripeClient(key)
         response_obj = client.raw_request(
             "post",
             f"/v1/subscription_items/{sub_item_id}/usage_records",
@@ -148,7 +150,7 @@ def charge_one_time_topup(customer_id: str, amount_cents: int = 2000, descriptio
     """
     logger.info("stripe_topup_charge_start", customer_id=customer_id, amount=amount_cents)
 
-    if customer_id.startswith("cus_mocked_") or STRIPE_SECRET_KEY.startswith("sk_test_51Pmocked"):
+    if customer_id.startswith("cus_mocked_") or get_stripe_key().startswith("sk_test_51Pmocked"):
         logger.warn("stripe_mock_mode_active", action="charge_topup")
         return True
 

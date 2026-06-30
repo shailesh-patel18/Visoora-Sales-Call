@@ -15,7 +15,7 @@ from typing import Optional, Dict, Any
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.trace import StatusCode, Status
@@ -74,7 +74,7 @@ def init_tracer(
         )
     else:
         # Local development: print spans to console
-        provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
+        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
         logging.getLogger("visoora.tracing").info(
             "No OTLP endpoint configured — using console span exporter"
         )
