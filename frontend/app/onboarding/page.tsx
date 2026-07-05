@@ -215,7 +215,7 @@ export default function V3OnboardingPage() {
                       const titles = e.target.value.split(",").map(t => t.trim()).filter(Boolean);
                       setBrainData({
                         ...brainData, 
-                        estimated_decision_makers: titles.map(t => ({ title: t, match_score: 90 }))
+                        estimated_decision_makers: titles.map(t => ({ title: t, confidence: 90 }))
                       });
                     }}
                     placeholder="e.g. CEO, VP of Sales (comma separated)"
