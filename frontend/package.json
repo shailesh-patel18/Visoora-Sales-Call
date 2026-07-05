@@ -9,18 +9,18 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
+    "@sentry/nextjs": "^8.0.0",
     "@tanstack/react-query": "^5.100.14",
     "framer-motion": "^11.11.17",
     "lucide-react": "^0.460.0",
-    "next": "15.0.3",
+    "next": "^16.2.10",
     "react": "19.0.0-rc-66855b96-20241106",
     "react-dom": "19.0.0-rc-66855b96-20241106",
     "react-hook-form": "^7.76.1",
     "react-is": "^19.2.6",
     "recharts": "^3.8.1",
     "zod": "^4.4.3",
-    "zustand": "^5.0.13",
-    "@sentry/nextjs": "^8.0.0"
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
