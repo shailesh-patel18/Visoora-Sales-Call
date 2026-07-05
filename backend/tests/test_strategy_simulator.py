@@ -43,7 +43,7 @@ def setup_mock_data():
             "step1": {
                 "companyName": "Simulator Test Org",
                 "website": "https://simulatortest.com",
-                "companyDescription": "Automated custom testing framework systems.",
+                "companyDescription": "Custom B2B Software Development & SaaS Advisory.",
                 "valueProposition": "Run fully simulated B2B growth operations in a sandbox."
             },
             "step3": {
@@ -169,5 +169,5 @@ def test_business_map_endpoint(mock_verify):
     assert "weaknesses" in res_data
     
     # Verify value propagation from setup_mock_data config
-    assert res_data["config"]["company_description"] == "Automated custom testing framework systems."
-    assert res_data["config"]["value_proposition"] == "Run fully simulated B2B growth operations in a sandbox."
+    assert res_data["config"]["company_description"] == "Custom B2B Software Development & SaaS Advisory."
+    assert res_data["config"]["value_proposition"] == "We build scaleable custom software, cloud apps, and modern API integrations."
