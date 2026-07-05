@@ -14,7 +14,7 @@ import json
 import random
 import httpx
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Dict, Any, List, Optional
 
 from security.rbac import get_current_user, UserPrincipal

@@ -17,7 +17,7 @@ export default function V3OnboardingPage() {
   const [brainData, setBrainData] = useState<AnalyzeDomainResponse | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isFinished, setIsFinished] = useState(false);
-  const { session } = useAuthStore();
+  const { user } = useAuthStore();
 
   const handleStartAnalysis = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +44,7 @@ export default function V3OnboardingPage() {
 
     try {
       // 1. Generate or fetch tenant ID
-      const tenantId = session?.user?.id || `t_${Math.random().toString(36).substring(7)}`;
+      const tenantId = user?.id || `t_${Math.random().toString(36).substring(7)}`;
 
       // 2. Call complete API
       await completeOnboarding({
