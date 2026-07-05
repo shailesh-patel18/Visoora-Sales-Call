@@ -1,12 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Brain, CheckCircle2, ChevronRight, Target, Users, Zap, ShieldAlert, ArrowRight, Loader2 } from "lucide-react";
 import { useAuthStore, getAuthHeaders } from "../auth/store";
 import { BACKEND_URL } from "../config";
 
-export default function ActivationPage() {
+function ActivationContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const reportId = searchParams.get("report_id");
@@ -254,5 +254,13 @@ export default function ActivationPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function ActivationPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[hsl(var(--surface-0))] flex items-center justify-center text-white">Loading...</div>}>
+      <ActivationContent />
+    </Suspense>
   );
 }

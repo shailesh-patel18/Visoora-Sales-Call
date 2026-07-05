@@ -10,7 +10,6 @@ from datetime import datetime
 from server.storage_manager import supabase_client
 from server.worker import register_job_handler
 from crm.auto_advance import _load_local_json, _save_local_json
-from api.supabase_client import get_supabase_client
 from ai_platform.agents.research_agent import ResearchAgent
 
 logger = structlog.get_logger("visoora_company_research")
