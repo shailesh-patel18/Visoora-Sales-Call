@@ -165,7 +165,7 @@ def test_sales_employee_endpoints_require_tenant_and_write_reply_history():
         "/api/v1/sales-employee/agents",
         json={"name": "Missing Tenant", "persona_config": {}},
     )
-    assert agent_res.status_code == 422
+    assert agent_res.status_code == 400
 
     headers = {"X-Tenant-ID": "phase_a_tenant"}
     agent_res = client.post(

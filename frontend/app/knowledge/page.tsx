@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useOnboardingStore } from "../onboarding/store";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 interface FAQItem {
   question: string;
@@ -14,7 +15,7 @@ interface FAQItem {
 }
 
 export default function KnowledgePage() {
-  const { state, loadProgress, saveProgress } = useOnboardingStore();
+  const { state, loadProgress, saveProgress, updateStep1, updateStep7, updateStep8, completeOnboarding } = useOnboardingStore();
   const [mounted, setMounted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -26,15 +27,19 @@ export default function KnowledgePage() {
   const [valuePropositionInput, setValuePropositionInput] = useState("");
 
   const [agents, setAgents] = useState<{ id: string; name: string }[]>([]);
+  const [isLoadingAgents, setIsLoadingAgents] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [crawling, setCrawling] = useState(false);
   const [crawlSuccess, setCrawlSuccess] = useState(false);
 
   const fetchAgents = async () => {
+    setIsLoadingAgents(true);
+    setFetchError(false);
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const data = await res.json();
@@ -42,9 +47,14 @@ export default function KnowledgePage() {
         if (data && data.length > 0) {
           setSelectedAgentId(data[0].id);
         }
+      } else {
+        setFetchError(true);
       }
     } catch (err) {
       console.warn("Failed to load agents in knowledge page:", err);
+      setFetchError(true);
+    } finally {
+      setIsLoadingAgents(false);
     }
   };
 
@@ -56,16 +66,14 @@ export default function KnowledgePage() {
 
   // Initialize values from store
   useEffect(() => {
-    if (state.step3) {
-      setWikiInput(state.step3.kbDescription || "Visoora CRM covers built-in Twilio lines, automatic calendar slots scheduling, local compliance triggers, and multi-channel SMS followups.");
-      setCompanyDescriptionInput(state.step3.companyDescription || "");
-      setValuePropositionInput(state.step3.valueProposition || "");
-      setFaqs(state.step3.kbFaqs || [
-        { question: "What is your pricing model?", answer: "Pricing starts at $199/month for our growth plan, covering unlimited calling and direct CRM integrations." },
-        { question: "How long does setup take?", answer: "Setup takes less than 10 minutes. You can claim a Twilio number and start dialing instantly." }
-      ]);
-    }
-  }, [state.step3]);
+    setWikiInput(state.kbDescription || "Visoora CRM covers built-in Twilio lines, automatic calendar slots scheduling, local compliance triggers, and multi-channel SMS followups.");
+    setCompanyDescriptionInput(state.step1?.companyDescription || "");
+    setValuePropositionInput(state.step1?.valueProposition || "");
+    setFaqs(state.kbFaqs || [
+      { question: "What is your pricing model?", answer: "Pricing starts at $199/month for our growth plan, covering unlimited calling and direct CRM integrations." },
+      { question: "How long does setup take?", answer: "Setup takes less than 10 minutes. You can claim a Twilio number and start dialing instantly." }
+    ]);
+  }, [state.step1, state.kbDescription, state.kbFaqs]);
 
 
   const handleAddFaq = () => {
@@ -90,20 +98,17 @@ export default function KnowledgePage() {
   };
 
   const handleSaveKnowledge = async () => {
-    if (!state.step3) return;
     setIsSaving(true);
-
-    const updatedStep3 = {
-      ...state.step3,
-      kbDescription: wikiInput,
-      companyDescription: companyDescriptionInput,
-      valueProposition: valuePropositionInput,
-      kbFaqs: faqs.filter(f => f.question && f.answer), // Filter empty FAQs
-    };
 
     const mergedState = {
       ...state,
-      step3: updatedStep3,
+      step1: state.step1 ? {
+        ...state.step1,
+        companyDescription: companyDescriptionInput,
+        valueProposition: valuePropositionInput,
+      } : null,
+      kbDescription: wikiInput,
+      kbFaqs: faqs.filter(f => f.question && f.answer),
     };
 
     await saveProgress(mergedState);
@@ -114,8 +119,8 @@ export default function KnowledgePage() {
         await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents/${selectedAgentId}/knowledge/text`, {
           method: "POST",
           headers: {
-            "Content-Type": "application/json",
-            "X-Tenant-ID": "acme_tenant"
+            ...getAuthHeaders(),
+            "Content-Type": "application/json"
           },
           body: JSON.stringify({
             source_file: "wiki_grounding.txt",
@@ -127,44 +132,8 @@ export default function KnowledgePage() {
       }
     }
 
-    // Call onboarding/complete endpoint to trigger server config DB sync
     try {
-      await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tenant_id: "default_shared_tenant",
-          company_name: state.step1?.companyName || "Unknown",
-          website: state.step1?.website || "",
-          industry: state.step1?.industry || "",
-          team_size: state.step1?.teamSize || "",
-          annual_revenue: state.step1?.annualRevenue || "",
-          target_region: state.step1?.targetRegion || "",
-          phone_number: state.step2?.twilioNumber || "",
-          agent_name: state.step3?.agentName || "Alex",
-          company_description: updatedStep3.companyDescription,
-          value_proposition: updatedStep3.valueProposition,
-          voice: state.step3?.voice || "rachel",
-          tone: state.step3?.tone || "consultative",
-          timezone: state.step3?.timezone || "America/New_York",
-          calling_hours_start: state.step3?.callingHoursStart || "08:00",
-          calling_hours_end: state.step3?.callingHoursEnd || "17:00",
-          product_name: state.step3?.productName || "",
-          product_price: state.step3?.productPrice || "",
-          product_features: state.step3?.productFeatures || "",
-          target_audience: state.step3?.targetAudience || "",
-          kb_description: updatedStep3.kbDescription,
-          kb_faqs: updatedStep3.kbFaqs,
-          objections_list: state.step3?.objectionsList || [],
-          recording_disclosure: state.step4?.recordingDisclosure || false,
-          consent_confirmed: state.step4?.consentConfirmed || false,
-          country: state.step4?.country || "US",
-          import_source: state.step5?.importSource || "csv",
-          campaign_goal: state.step5?.campaignGoal || "",
-          playbook_greeting: state.step5?.playbookGreeting || "",
-          playbook_booking_link: state.step5?.playbookBookingLink || "",
-        }),
-      });
+      await completeOnboarding();
     } catch (err) {
       console.warn("DB update failed: ", err);
     }
@@ -185,8 +154,8 @@ export default function KnowledgePage() {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents/${selectedAgentId}/knowledge/website`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "X-Tenant-ID": "acme_tenant"
+          ...getAuthHeaders(),
+          "Content-Type": "application/json"
         },
         body: JSON.stringify({ url: websiteUrl.trim() })
       });
@@ -241,19 +210,30 @@ export default function KnowledgePage() {
           {/* Agent Selection Card */}
           <div className="rounded-xl border p-5 flex flex-col gap-3" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>
             <span className="text-[10px] font-semibold text-neutral-400 uppercase tracking-wider">Select AI Agent to Ground</span>
-            <select
-              value={selectedAgentId}
-              onChange={(e) => setSelectedAgentId(e.target.value)}
-              className="w-full bg-[hsl(var(--surface-2))] border border-[hsl(var(--border-default))] rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-[hsl(var(--brand-primary))]"
-            >
-              {agents.length === 0 ? (
-                <option value="">No Agents Created Yet</option>
-              ) : (
-                agents.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))
-              )}
-            </select>
+            {isLoadingAgents ? (
+              <div className="flex justify-center items-center py-4">
+                <span className="text-xs text-gray-500 animate-pulse">Loading Agents...</span>
+              </div>
+            ) : fetchError ? (
+              <div className="flex flex-col gap-2 p-2">
+                <span className="text-xs text-red-500">Failed to load agents.</span>
+                <button onClick={fetchAgents} className="text-xs bg-white/10 px-2 py-1 rounded">Retry</button>
+              </div>
+            ) : (
+              <select
+                value={selectedAgentId}
+                onChange={(e) => setSelectedAgentId(e.target.value)}
+                className="w-full bg-[hsl(var(--surface-2))] border border-[hsl(var(--border-default))] rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-[hsl(var(--brand-primary))]"
+              >
+                {agents.length === 0 ? (
+                  <option value="">No Agents Created Yet</option>
+                ) : (
+                  agents.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))
+                )}
+              </select>
+            )}
           </div>
 
           <div className="rounded-xl border p-5 flex flex-col gap-4" style={{ background: "hsl(var(--surface-1))", borderColor: "hsl(var(--border-subtle))" }}>

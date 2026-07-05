@@ -15,6 +15,10 @@ export interface Contact {
   lead_score: number;
   lead_source?: string;
   tags?: string[];
+  custom_fields?: {
+    lead_score_reason?: string;
+    [key: string]: any;
+  };
   created_at: string;
   updated_at: string;
 }

@@ -1,0 +1,43 @@
+{
+    "workflow_name": "Autonomous_Outbound_Campaign",
+    "version": 1,
+    "steps": [
+        {
+            "step_id": "step_1_find_prospects",
+            "action": "execute_agent",
+            "agent_type": "ProspectingAgent",
+            "depends_on": [],
+            "payload": {
+                "instruction": "Find qualified leads matching the Ideal Customer Profile."
+            }
+        },
+        {
+            "step_id": "step_2_draft_emails",
+            "action": "execute_agent",
+            "agent_type": "EmailAgent",
+            "depends_on": ["step_1_find_prospects"],
+            "payload": {
+                "instruction": "Draft hyper-personalized cold emails for the newly found prospects."
+            }
+        },
+        {
+            "step_id": "step_3_human_approval",
+            "action": "request_approval",
+            "agent_type": null,
+            "depends_on": ["step_2_draft_emails"],
+            "payload": {
+                "context": "Please review the AI-drafted emails in your Inbox before sending."
+            }
+        },
+        {
+            "step_id": "step_4_dispatch_emails",
+            "action": "execute_tool",
+            "agent_type": null,
+            "depends_on": ["step_3_human_approval"],
+            "payload": {
+                "capability": "SEND_EMAIL",
+                "instruction": "Dispatch all approved Email Drafts."
+            }
+        }
+    ]
+}

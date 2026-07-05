@@ -1,8 +1,59 @@
+import os
+import base64
+import time
 from typing import Dict, Any, Optional
 import structlog
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.hashes import SHA256
 from sales_employee.services import history_service, store, require_tenant_id, utc_now
 
 logger = structlog.get_logger("visoora_delivery_tracker")
+
+# In-memory deduplication set
+PROCESSED_EVENT_IDS = set()
+
+def verify_sendgrid_signature(signature: str, timestamp: str, payload_bytes: bytes) -> bool:
+    """
+    Verifies the ECDSA signature of SendGrid event webhooks using the configured public key.
+    """
+    public_key_pem = os.getenv("SENDGRID_WEBHOOK_PUBLIC_KEY", "mock")
+    if public_key_pem == "mock" or os.getenv("APP_ENV") == "test":
+        # Bypass signature checks during development and testing if mock is configured
+        return True
+        
+    try:
+        msg = timestamp.encode("utf-8") + payload_bytes
+        sig_bytes = base64.b64decode(signature)
+        public_key = serialization.load_pem_public_key(public_key_pem.encode("utf-8"))
+        public_key.verify(sig_bytes, msg, ec.ECDSA(SHA256()))
+        return True
+    except Exception as exc:
+        logger.error("sendgrid_signature_verification_failed", error=str(exc))
+        return False
+
+def check_replay_and_deduplicate(event_id: str, timestamp_epoch: float) -> bool:
+    """
+    Deduplicates webhook events and rejects items outside the 5-minute replay window.
+    """
+    # 1. 5-minute replay window guard
+    age = time.time() - timestamp_epoch
+    if age > 300 or age < -300:
+        logger.warn("webhook_replay_rejected_stale_timestamp", event_id=event_id, age=age)
+        return False
+        
+    # 2. Deduplication check
+    if event_id in PROCESSED_EVENT_IDS:
+        logger.warn("webhook_deduplication_rejected_duplicate", event_id=event_id)
+        return False
+        
+    PROCESSED_EVENT_IDS.add(event_id)
+    if len(PROCESSED_EVENT_IDS) > 5000:
+        try:
+            PROCESSED_EVENT_IDS.remove(next(iter(PROCESSED_EVENT_IDS)))
+        except Exception:
+            pass
+    return True
 
 def track_delivery_event(
     tenant_id: str,

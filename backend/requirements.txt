@@ -15,11 +15,19 @@ redis>=5.0.1
 python-multipart>=0.0.9
 pydantic-settings>=2.2.1
 pypdf>=4.0.0
+alembic>=1.13.0
 
 # Observability stack
+sentry-sdk>=2.0.0
 opentelemetry-api>=1.24.0
 opentelemetry-sdk>=1.24.0
 opentelemetry-exporter-otlp-proto-grpc>=1.24.0
 opentelemetry-instrumentation-fastapi>=0.45b0
 prometheus-client>=0.20.0
 cryptography>=42.0.0
+
+# AI Provider SDKs & Orchestration
+google-genai>=0.2.0
+anthropic>=0.30.0
+openai>=1.35.0
+tenacity>=8.4.1

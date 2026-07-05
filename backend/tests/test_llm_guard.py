@@ -156,17 +156,9 @@ def test_grounding_score_checker():
 async def test_llm_provider_circuit_breaker():
     """Verifies that 3 consecutive failures triggers a provider failover cascade."""
     chain = LLMProviderFallbackChain()
-    assert chain.active_provider == "google"
+    assert chain.active_provider == "claude"
 
     # Simulate 3 failures
-    await chain.record_failure_and_check_failover()
-    await chain.record_failure_and_check_failover()
-    await chain.record_failure_and_check_failover()
-    
-    # Assert active provider auto-switched to gpt4o directly (claude removed)
-    assert chain.active_provider == "gpt4o"
-
-    # Simulate 3 more failures
     await chain.record_failure_and_check_failover()
     await chain.record_failure_and_check_failover()
     await chain.record_failure_and_check_failover()

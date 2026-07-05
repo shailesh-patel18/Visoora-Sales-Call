@@ -13,7 +13,9 @@ import {
   User,
   Trash2,
   AlertCircle,
-  ChevronDown
+  ChevronDown,
+  RefreshCw,
+  ShieldAlert
 } from "lucide-react";
 import { useCRMStore, type Deal, type PipelineStage } from "../store";
 import { BACKEND_URL } from "../config";
@@ -204,6 +206,8 @@ export default function PipelinePage() {
   const { stages, setStages, moveDeal, addDeal, removeDeal, contacts, setContacts } = useCRMStore();
   const [mounted, setMounted] = useState(false);
   const [dragInfo, setDragInfo] = useState<{ dealId: string; fromStageId: string } | null>(null);
+  const [isLoadingPipeline, setIsLoadingPipeline] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   // Modal & Form States
   const [showAddModal, setShowAddModal] = useState(false);
@@ -215,6 +219,8 @@ export default function PipelinePage() {
   const [newNextAction, setNewNextAction] = useState("");
 
   const fetchContactsAndPipeline = async () => {
+    setIsLoadingPipeline(true);
+    setFetchError(false);
     try {
       // 1. Fetch contacts first to get the name/company detail mapping
       const contactsRes = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
@@ -224,6 +230,10 @@ export default function PipelinePage() {
       if (contactsRes.ok) {
         contactsList = await contactsRes.json();
         setContacts(contactsList);
+      } else {
+         setFetchError(true);
+         setIsLoadingPipeline(false);
+         return;
       }
 
       // 2. Fetch pipeline stage deals
@@ -242,27 +252,30 @@ export default function PipelinePage() {
             const contact = contactsList.find((c: any) => c.id === d.contact_id);
             return {
               id: String(d.id),
-              tenant_id: d.tenant_id,
               contact_id: String(d.contact_id || ""),
               contact_name: contact ? contact.full_name : "Unknown Contact",
               company_name: contact ? contact.company_name : "Unknown Company",
               stage_id: String(d.stage_id),
               stage_name: s.stage_name,
-              title: d.title,
-              value_usd: d.value_usd,
+              title: d.title || "Untitled Deal",
+              value_usd: d.value_usd || 0,
               currency: d.currency || "USD",
-              close_date: d.close_date,
               ai_sentiment: d.ai_sentiment || "unknown",
-              ai_next_action: d.ai_next_action,
-              last_activity_date: d.updated_at || d.created_at,
+              ai_next_action: d.ai_next_action || "",
               created_at: d.created_at,
+              updated_at: d.updated_at
             };
           }),
         }));
         setStages(mapped);
+      } else {
+        setFetchError(true);
       }
     } catch (err) {
-      console.warn("Failed to load pipeline dynamically:", err);
+      console.warn("Failed to fetch pipeline data:", err);
+      setFetchError(true);
+    } finally {
+      setIsLoadingPipeline(false);
     }
   };
 
@@ -338,7 +351,6 @@ export default function PipelinePage() {
     const contact = contacts.find((c) => c.id === selectedContactId);
 
     const payload = {
-      tenant_id: "acme_tenant",
       contact_id: selectedContactId,
       stage_id: selectedStageId,
       title: newTitle.trim(),
@@ -426,19 +438,33 @@ export default function PipelinePage() {
         </button>
       </div>
 
-      {/* Kanban Board */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => (
-          <KanbanColumn
-            key={stage.id}
-            stage={stage}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onDeleteDeal={handleDeleteDeal}
-          />
-        ))}
-      </div>
+      {isLoadingPipeline ? (
+        <div className="flex flex-col items-center justify-center h-[50vh] text-gray-500">
+          <RefreshCw className="w-8 h-8 animate-spin text-[#00F0FF] mb-4" />
+          <p>Loading Pipeline...</p>
+        </div>
+      ) : fetchError ? (
+        <div className="flex flex-col items-center justify-center h-[50vh] text-gray-500">
+          <ShieldAlert className="w-12 h-12 text-red-500 mb-4" />
+          <p className="mb-4">Failed to load pipeline data.</p>
+          <button onClick={fetchContactsAndPipeline} className="px-4 py-2 bg-white text-black font-semibold rounded-lg hover:bg-gray-200">
+            Retry
+          </button>
+        </div>
+      ) : (
+        <div className="flex gap-4 overflow-x-auto pb-4 h-[calc(100vh-160px)]">
+          {stages.map((stage) => (
+            <KanbanColumn
+              key={stage.id}
+              stage={stage}
+              onDragStart={handleDragStart}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDeleteDeal={handleDeleteDeal}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Add Deal Modal */}
       {showAddModal && (

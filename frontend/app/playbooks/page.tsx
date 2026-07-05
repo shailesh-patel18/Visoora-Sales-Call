@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useOnboardingStore } from "../onboarding/store";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 interface PlaybookStep {
   state: string;
@@ -26,7 +27,7 @@ const playbookSteps: PlaybookStep[] = [
 ];
 
 export default function PlaybooksPage() {
-  const { state, loadProgress, saveProgress } = useOnboardingStore();
+  const { state, loadProgress, saveProgress, completeOnboarding } = useOnboardingStore();
   const [mounted, setMounted] = useState(false);
   const [activeStepState, setActiveStepState] = useState("INITIATION");
   const [isSaving, setIsSaving] = useState(false);
@@ -50,69 +51,26 @@ export default function PlaybooksPage() {
 
   // Initialize values from store
   useEffect(() => {
-    if (state.step5) {
-      setGreetingInput(state.step5.playbookGreeting || "Hi, is this the owner? I was calling because we noticed your agency is booking demos manually...");
-      setBookingLinkInput(state.step5.playbookBookingLink || "https://calendly.com/acme-demos/15min");
-      setGoalInput(state.step5.campaignGoal || "Book Demo Meeting");
-    }
-  }, [state.step5]);
+    setGreetingInput(state.playbookGreeting || "Hi, is this the owner? I was calling because we noticed your agency is booking demos manually...");
+    setBookingLinkInput(state.playbookBookingLink || "https://calendly.com/acme-demos/15min");
+    setGoalInput(state.campaignGoal || "Book Demo Meeting");
+  }, [state.playbookGreeting, state.playbookBookingLink, state.campaignGoal]);
 
   const handleSavePlaybook = async () => {
-    if (!state.step5) return;
     setIsSaving(true);
-
-    const updatedStep5 = {
-      ...state.step5,
-      playbookGreeting: greetingInput,
-      playbookBookingLink: bookingLinkInput,
-      campaignGoal: goalInput,
-    };
 
     const mergedState = {
       ...state,
-      step5: updatedStep5,
+      playbookGreeting: greetingInput,
+      playbookBookingLink: bookingLinkInput,
+      campaignGoal: goalInput,
     };
 
     await saveProgress(mergedState);
 
     // Call onboarding/complete endpoint to trigger server config DB sync
     try {
-      await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tenant_id: "default_shared_tenant",
-          company_name: state.step1?.companyName || "Unknown",
-          website: state.step1?.website || "",
-          industry: state.step1?.industry || "",
-          team_size: state.step1?.teamSize || "",
-          annual_revenue: state.step1?.annualRevenue || "",
-          target_region: state.step1?.targetRegion || "",
-          phone_number: state.step2?.twilioNumber || "",
-          agent_name: state.step3?.agentName || "Alex",
-          company_description: state.step3?.companyDescription || "",
-          value_proposition: state.step3?.valueProposition || "",
-          voice: state.step3?.voice || "rachel",
-          tone: state.step3?.tone || "consultative",
-          timezone: state.step3?.timezone || "America/New_York",
-          calling_hours_start: state.step3?.callingHoursStart || "08:00",
-          calling_hours_end: state.step3?.callingHoursEnd || "17:00",
-          product_name: state.step3?.productName || "",
-          product_price: state.step3?.productPrice || "",
-          product_features: state.step3?.productFeatures || "",
-          target_audience: state.step3?.targetAudience || "",
-          kb_description: state.step3?.kbDescription || "",
-          kb_faqs: state.step3?.kbFaqs || [],
-          objections_list: state.step3?.objectionsList || [],
-          recording_disclosure: state.step4?.recordingDisclosure || false,
-          consent_confirmed: state.step4?.consentConfirmed || false,
-          country: state.step4?.country || "US",
-          import_source: state.step5?.importSource || "csv",
-          campaign_goal: updatedStep5.campaignGoal,
-          playbook_greeting: updatedStep5.playbookGreeting,
-          playbook_booking_link: updatedStep5.playbookBookingLink,
-        }),
-      });
+      await completeOnboarding();
     } catch (err) {
       console.warn("DB update failed: ", err);
     }
@@ -261,10 +219,10 @@ export default function PlaybooksPage() {
                   <span className="font-semibold text-purple-400 block mb-1">Active Pitch Context:</span>
                   During this stage, the AI Employee dynamically retrieves target values from your **Product Catalog** configurations (configured in Onboarding or Agent settings):
                   <ul className="list-disc pl-4 mt-2 space-y-1">
-                    <li>Product Name: <span className="font-semibold text-white">{state.step3?.productName || "Visoora OS"}</span></li>
-                    <li>Value Proposition: <span className="font-semibold text-white">"{state.step3?.valueProposition || "None"}"</span></li>
-                    <li>Features: <span className="font-semibold text-white">{state.step3?.productFeatures || "None"}</span></li>
-                    <li>Pricing: <span className="font-semibold text-white">{state.step3?.productPrice || "None"}</span></li>
+                    <li>Company Name: <span className="font-semibold text-white">{state.step1?.companyName || "Visoora"}</span></li>
+                    <li>Value Proposition: <span className="font-semibold text-white">"{state.step1?.valueProposition || "None"}"</span></li>
+                    <li>Description: <span className="font-semibold text-white">{state.step1?.companyDescription || "None"}</span></li>
+                    <li>Website: <span className="font-semibold text-white">{state.step1?.website || "None"}</span></li>
                   </ul>
                 </div>
               </div>

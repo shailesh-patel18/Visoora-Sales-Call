@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useOnboardingStore } from "../onboarding/store";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 interface AgentProfile {
   id: string;
@@ -43,7 +44,7 @@ const roleTemplates = [
 ];
 
 export default function AgentsPage() {
-  const { state, loadProgress, saveProgress } = useOnboardingStore();
+  const { state, loadProgress, saveProgress, updateStep2, updateStep7, completeOnboarding } = useOnboardingStore();
   const [mounted, setMounted] = useState(false);
   const [playingVoice, setPlayingVoice] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -66,7 +67,7 @@ export default function AgentsPage() {
   const fetchRoster = async () => {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents`, {
-        headers: { "X-Tenant-ID": "acme_tenant" }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const data = await res.json();
@@ -114,13 +115,13 @@ export default function AgentsPage() {
 
   // Initialize roster from state.step3 onboarding config (fallback)
   useEffect(() => {
-    if (state.step3 && roster.length === 0) {
-      const activeName = state.step3.agentName || "Alex";
-      const activeVoice = state.step3.voice || "rachel";
-      const activeTone = state.step3.tone || "consultative";
-      const activeTimezone = state.step3.timezone || "America/New_York";
-      const activeStart = state.step3.callingHoursStart || "08:00";
-      const activeEnd = state.step3.callingHoursEnd || "17:00";
+    if (roster.length === 0) {
+      const activeName = state.step2?.agentName || "Alex";
+      const activeVoice = state.step7?.voice || "rachel";
+      const activeTone = state.step7?.tone || "consultative";
+      const activeTimezone = "America/New_York";
+      const activeStart = "08:00";
+      const activeEnd = "17:00";
       
       const initialActiveProfile: AgentProfile = {
         id: "active_profile",
@@ -232,63 +233,24 @@ export default function AgentsPage() {
     setRoster(updatedRoster);
 
     const activeProfile = updatedRoster.find((p) => p.isActive);
-    if (activeProfile && state.step3) {
+    if (activeProfile) {
       setIsSaving(true);
-      const updatedStep3 = {
-        ...state.step3,
-        agentName: activeProfile.name,
-        voice: activeProfile.voice,
-        tone: activeProfile.tone,
-        timezone: activeProfile.timezone,
-        callingHoursStart: activeProfile.callingHoursStart,
-        callingHoursEnd: activeProfile.callingHoursEnd,
-      };
-
       const mergedState = {
         ...state,
-        step3: updatedStep3,
+        step2: {
+          agentName: activeProfile.name,
+        },
+        step7: {
+          voice: activeProfile.voice,
+          tone: activeProfile.tone,
+          brandVoiceTone: state.step7?.brandVoiceTone || "Maintain a helpful, informative tone.",
+        }
       };
 
       await saveProgress(mergedState);
       
-      // Call onboarding/complete endpoint to trigger server config DB sync
       try {
-        await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tenant_id: "default_shared_tenant",
-            company_name: state.step1?.companyName || "Unknown",
-            website: state.step1?.website || "",
-            industry: state.step1?.industry || "",
-            team_size: state.step1?.teamSize || "",
-            annual_revenue: state.step1?.annualRevenue || "",
-            target_region: state.step1?.targetRegion || "",
-            phone_number: state.step2?.twilioNumber || "",
-            agent_name: updatedStep3.agentName,
-            company_description: updatedStep3.companyDescription,
-            value_proposition: updatedStep3.valueProposition,
-            voice: updatedStep3.voice,
-            tone: updatedStep3.tone,
-            timezone: updatedStep3.timezone,
-            calling_hours_start: updatedStep3.callingHoursStart,
-            calling_hours_end: updatedStep3.callingHoursEnd,
-            product_name: updatedStep3.productName,
-            product_price: updatedStep3.productPrice,
-            product_features: updatedStep3.productFeatures,
-            target_audience: updatedStep3.targetAudience,
-            kb_description: updatedStep3.kbDescription,
-            kb_faqs: updatedStep3.kbFaqs,
-            objections_list: updatedStep3.objectionsList,
-            recording_disclosure: state.step4?.recordingDisclosure || false,
-            consent_confirmed: state.step4?.consentConfirmed || false,
-            country: state.step4?.country || "US",
-            import_source: state.step5?.importSource || "csv",
-            campaign_goal: state.step5?.campaignGoal || "",
-            playbook_greeting: state.step5?.playbookGreeting || "",
-            playbook_booking_link: state.step5?.playbookBookingLink || "",
-          }),
-        });
+        await completeOnboarding();
       } catch (err) {
         console.warn("DB update failed: ", err);
       }
@@ -341,8 +303,8 @@ export default function AgentsPage() {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "X-Tenant-ID": "acme_tenant"
+          ...getAuthHeaders(),
+          "Content-Type": "application/json"
         },
         body: JSON.stringify(payload)
       });
@@ -353,64 +315,24 @@ export default function AgentsPage() {
       console.error("Failed to save agent to backend API:", err);
     }
 
-    // If saving the active profile, trigger saveProgress & completeOnboarding sync
     const active = updatedRoster.find((p) => p.isActive);
-    if (active && state.step3) {
-      const updatedStep3 = {
-        ...state.step3,
-        agentName: active.name,
-        voice: active.voice,
-        tone: active.tone,
-        timezone: active.timezone,
-        callingHoursStart: active.callingHoursStart,
-        callingHoursEnd: active.callingHoursEnd,
-      };
-
+    if (active) {
       const mergedState = {
         ...state,
-        step3: updatedStep3,
+        step2: {
+          agentName: active.name,
+        },
+        step7: {
+          voice: active.voice,
+          tone: active.tone,
+          brandVoiceTone: state.step7?.brandVoiceTone || "Maintain a helpful, informative tone.",
+        }
       };
 
       await saveProgress(mergedState);
-
-      // Trigger sync completion
+      
       try {
-        await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            tenant_id: "default_shared_tenant",
-            company_name: state.step1?.companyName || "Unknown",
-            website: state.step1?.website || "",
-            industry: state.step1?.industry || "",
-            team_size: state.step1?.teamSize || "",
-            annual_revenue: state.step1?.annualRevenue || "",
-            target_region: state.step1?.targetRegion || "",
-            phone_number: state.step2?.twilioNumber || "",
-            agent_name: updatedStep3.agentName,
-            company_description: updatedStep3.companyDescription,
-            value_proposition: updatedStep3.valueProposition,
-            voice: updatedStep3.voice,
-            tone: updatedStep3.tone,
-            timezone: updatedStep3.timezone,
-            calling_hours_start: updatedStep3.callingHoursStart,
-            calling_hours_end: updatedStep3.callingHoursEnd,
-            product_name: updatedStep3.productName,
-            product_price: updatedStep3.productPrice,
-            product_features: updatedStep3.productFeatures,
-            target_audience: updatedStep3.targetAudience,
-            kb_description: updatedStep3.kbDescription,
-            kb_faqs: updatedStep3.kbFaqs,
-            objections_list: updatedStep3.objectionsList,
-            recording_disclosure: state.step4?.recordingDisclosure || false,
-            consent_confirmed: state.step4?.consentConfirmed || false,
-            country: state.step4?.country || "US",
-            import_source: state.step5?.importSource || "csv",
-            campaign_goal: state.step5?.campaignGoal || "",
-            playbook_greeting: state.step5?.playbookGreeting || "",
-            playbook_booking_link: state.step5?.playbookBookingLink || "",
-          }),
-        });
+        await completeOnboarding();
       } catch (err) {
         console.warn("DB update failed: ", err);
       }

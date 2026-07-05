@@ -144,9 +144,10 @@ def test_twilio_webhook_missing_signature_rejected():
     """
     Asserts missing Twilio signature header on webhooks is blocked with 401 status.
     """
-    response = client.post("/incoming-call", data={"CallSid": "CA123"})
-    assert response.status_code == 401
-    assert "Missing Twilio signature" in response.json()["detail"]
+    with patch.object(settings, "twilio_auth_token", "real_non_mock_token_value"):
+        response = client.post("/incoming-call", data={"CallSid": "CA123"})
+        assert response.status_code == 401
+        assert "Missing Twilio signature" in response.json()["detail"]
 
 # ----------------------------------------------------
 # TEST GROUP 6: TENANT-BASED RATE LIMITING

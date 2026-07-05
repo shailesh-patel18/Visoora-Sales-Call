@@ -450,6 +450,7 @@ class TestM32LLMGuardFallback:
             return "As an AI language model, I guarantee 100% success rates."
 
         provider_calls = {
+            "claude": flagged_response_call,
             "google": flagged_response_call,
             "gpt4o": flagged_response_call,
             "emergency": flagged_response_call

@@ -14,6 +14,7 @@ import {
   Inbox,
 } from "lucide-react";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 // ====================================================
 // TYPES
@@ -98,7 +99,7 @@ export default function CallsPage() {
       const params = new URLSearchParams({ limit: "50", offset: "0" });
       if (q) params.set("search", q);
       const res = await fetch(`${BACKEND_URL}/api/analytics/calls?${params}`, {
-        credentials: "include",
+        headers: getAuthHeaders(),
       });
       if (!res.ok) throw new Error(`Server responded ${res.status}`);
       const data = await res.json();

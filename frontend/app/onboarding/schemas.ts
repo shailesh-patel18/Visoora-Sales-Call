@@ -1,23 +1,69 @@
 import { z } from "zod";
 
-// ====================================================
-// STEP 1: COMPANY SETUP
-// ====================================================
+// Step 1: Business Context & URL
 export const step1Schema = z.object({
   companyName: z.string().min(2, "Company name must be at least 2 characters"),
   website: z.string().url("Invalid website URL. Must start with http:// or https://"),
-  industry: z.string().min(1, "Please select an industry"),
-  teamSize: z.string().min(1, "Please select your team size"),
-  annualRevenue: z.string().min(1, "Please select estimated annual revenue"),
-  targetRegion: z.string().min(1, "Please select target call region"),
+  companyDescription: z.string().min(20, "Please describe your company (at least 20 characters)"),
+  valueProposition: z.string().min(10, "Please outline your value proposition (at least 10 characters)"),
 });
-
 export type Step1Data = z.infer<typeof step1Schema>;
 
-// ====================================================
-// STEP 2: PHONE NUMBER PROVISIONING
-// ====================================================
+// Step 2: Agent Identity
 export const step2Schema = z.object({
+  agentName: z.string().min(2, "Agent name must be at least 2 characters"),
+});
+export type Step2Data = z.infer<typeof step2Schema>;
+
+// Step 3: ICP Industries
+export const step3Schema = z.object({
+  icpIndustries: z.array(z.string()).min(1, "Please select at least one industry"),
+});
+export type Step3Data = z.infer<typeof step3Schema>;
+
+// Step 4: ICP Regions
+export const step4Schema = z.object({
+  icpRegions: z.array(z.string()).min(1, "Please select at least one target region"),
+});
+export type Step4Data = z.infer<typeof step4Schema>;
+
+// Step 5: Decision Maker Titles
+export const step5Schema = z.object({
+  decisionMakerTitles: z.array(z.string()).min(1, "Please select or add at least one title"),
+});
+export type Step5Data = z.infer<typeof step5Schema>;
+
+// Step 6: Competitors
+export const step6Schema = z.object({
+  competitors: z.array(z.string()).optional(),
+});
+export type Step6Data = z.infer<typeof step6Schema>;
+
+// Step 7: Voice & Tone Selection
+export const step7Schema = z.object({
+  voice: z.string().min(1, "Please select a voice profile"),
+  tone: z.string().min(1, "Please select a tone profile"),
+  brandVoiceTone: z.string().min(5, "Please outline your brand voice rules in a brief instruction"),
+});
+export type Step7Data = z.infer<typeof step7Schema>;
+
+// Step 8: Core Objections
+export const step8Schema = z.object({
+  objectionsList: z.array(z.object({
+    objection: z.string().min(5, "Objection trigger must be at least 5 characters"),
+    rebuttal: z.string().min(5, "Rebuttal response must be at least 5 characters")
+  })).min(1, "Please define at least one common objection & rebuttal"),
+});
+export type Step8Data = z.infer<typeof step8Schema>;
+
+// Step 9: Avoid-List
+export const step9Schema = z.object({
+  avoidList: z.array(z.string()).optional(),
+});
+export type Step9Data = z.infer<typeof step9Schema>;
+
+// Step 10: Phone Number Selection
+export const step10Schema = z.object({
   phoneOption: z.enum(["buy", "port"]),
   twilioNumber: z.string().optional(),
   portedNumber: z.string().optional(),
@@ -31,78 +77,17 @@ export const step2Schema = z.object({
   },
   {
     message: "Please specify a valid Twilio number or ported number in E.164 format (+1...)",
-    path: ["portedNumber"], // Put the error on portedNumber or can handle dynamically
+    path: ["portedNumber"],
   }
 );
+export type Step10Data = z.infer<typeof step10Schema>;
 
-export type Step2Data = z.infer<typeof step2Schema>;
-
-// ====================================================
-// STEP 3: AI AGENT CONFIGURATION
-// ====================================================
-export const step3Schema = z.object({
-  agentName: z.string().min(2, "Agent name must be at least 2 characters"),
-  companyDescription: z.string().min(20, "Please provide at least 20 characters describing your company"),
-  valueProposition: z.string().min(10, "Please provide a value proposition (at least 10 characters)"),
-  voice: z.string().min(1, "Please select a voice profile"),
-  tone: z.string().min(1, "Please select a tone profile"),
-  timezone: z.string().min(1, "Please select a timezone"),
-  callingHoursStart: z.string().regex(/^\d{2}:\d{2}$/, "Invalid time format (HH:MM)"),
-  callingHoursEnd: z.string().regex(/^\d{2}:\d{2}$/, "Invalid time format (HH:MM)"),
-  productName: z.string().min(2, "Product name must be at least 2 characters"),
-  productPrice: z.string().min(1, "Please specify product pricing (e.g. $99/mo)"),
-  productFeatures: z.string().min(10, "Please outline core features (at least 10 characters)"),
-  targetAudience: z.string().min(10, "Please describe the target audience (at least 10 characters)"),
-  kbDescription: z.string().optional(),
-  kbFaqs: z.array(z.object({
-    question: z.string().min(5, "Question must be at least 5 characters"),
-    answer: z.string().min(5, "Answer must be at least 5 characters")
-  })).optional(),
-  objectionsList: z.array(z.object({
-    objection: z.string().min(5, "Objection trigger must be at least 5 characters"),
-    rebuttal: z.string().min(5, "Rebuttal response must be at least 5 characters")
-  })).optional(),
-});
-
-export type Step3Data = z.infer<typeof step3Schema>;
-
-// ====================================================
-// STEP 4: COMPLIANCE CONFIGURATION
-// ====================================================
-export const step4Schema = z.object({
-  consentConfirmed: z.boolean().refine((val) => val === true, {
-    message: "You must confirm prior express written consent to proceed",
-  }),
-  recordingDisclosure: z.boolean(),
-  country: z.string().min(1, "Please select a country"),
-});
-
-export type Step4Data = z.infer<typeof step4Schema>;
-
-// ====================================================
-// STEP 5: IMPORT CONTACTS
-// ====================================================
-export const step5Schema = z.object({
-  importSource: z.enum(["csv", "hubspot", "salesforce"]),
-  campaignGoal: z.string().min(1, "Please select a campaign goal"),
-  playbookGreeting: z.string().min(10, "Playbook greeting script must be at least 10 characters"),
-  playbookBookingLink: z.string().url("Invalid booking URL. Must start with http:// or https://").or(z.string().length(0)).optional(),
-});
-
-export type Step5Data = z.infer<typeof step5Schema>;
-
-// ====================================================
-// STEP 6: TEST CALL
-// ====================================================
-export const step6Schema = z.object({
+// Step 11: Launch Sandbox Call
+export const step11Schema = z.object({
   testPhone: z.string().regex(/^\+[1-9]\d{1,14}$/, "Must be a valid E.164 phone number, e.g. +19195551234"),
 });
+export type Step11Data = z.infer<typeof step11Schema>;
 
-export type Step6Data = z.infer<typeof step6Schema>;
-
-// ====================================================
-// AGGREGATE WIZARD DATA TYPE
-// ====================================================
 export interface OnboardingWizardState {
   currentStep: number;
   step1: Step1Data | null;
@@ -111,5 +96,15 @@ export interface OnboardingWizardState {
   step4: Step4Data | null;
   step5: Step5Data | null;
   step6: Step6Data | null;
+  step7: Step7Data | null;
+  step8: Step8Data | null;
+  step9: Step9Data | null;
+  step10: Step10Data | null;
+  step11: Step11Data | null;
   isCompleted: boolean;
+  kbDescription?: string;
+  kbFaqs?: Array<{ question: string; answer: string }>;
+  playbookGreeting?: string;
+  playbookBookingLink?: string;
+  campaignGoal?: string;
 }

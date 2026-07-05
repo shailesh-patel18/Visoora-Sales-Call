@@ -6,9 +6,18 @@ from typing import Union
 
 # Retrieve key from environment or use a stable fallback for development/testing
 _KEY_STR = os.getenv("ENCRYPTION_SECRET")
+_APP_ENV = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+
 if not _KEY_STR:
-    # Fixed base64-encoded key for development consistency
-    _KEY_STR = "VisooraDefaultSecretEncryptionKeyMustBe32Bytes="
+    if _APP_ENV == "test":
+        # Fixed base64-encoded key for development/test consistency
+        _KEY_STR = "VisooraDefaultSecretEncryptionKeyMustBe32Bytes="
+    else:
+        raise RuntimeError(
+            "CRITICAL SECURITY CONFIGURATION ERROR: ENCRYPTION_SECRET environment variable is missing! "
+            "To prevent credentials compromise using the default developer key in non-test configurations, "
+            "the server refuses to initialize. Please configure ENCRYPTION_SECRET in your environment settings."
+        )
 
 # Ensure we have a valid 32-byte key for Fernet
 try:

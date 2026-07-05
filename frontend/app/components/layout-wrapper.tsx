@@ -6,6 +6,8 @@ import { Sidebar } from "./sidebar";
 import { useCRMStore } from "../store";
 import { Menu, Zap } from "lucide-react";
 
+import { NotificationCenter } from "./notification-center";
+
 export function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { mobileSidebarOpen, setMobileSidebarOpen } = useCRMStore();
@@ -42,43 +44,41 @@ export function LayoutWrapper({ children }: { children: React.ReactNode }) {
 
       {/* Main Container Wrapper */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
-        {/* Mobile Header Bar */}
-        <header 
-          className="flex md:hidden items-center justify-between px-4 py-3 border-b flex-shrink-0"
-          style={{ 
-            background: "hsl(var(--surface-1))", 
-            borderColor: "hsl(var(--border-subtle))" 
-          }}
-        >
-          <button 
-            onClick={() => setMobileSidebarOpen(true)}
-            className="p-1.5 -ml-1.5 text-[hsl(var(--text-secondary))] hover:text-white rounded-lg hover:bg-white/5 active:bg-white/10"
-            aria-label="Open sidebar"
-          >
-            <Menu className="w-5.5 h-5.5" />
-          </button>
+        {/* Global Trust Top Bar (Desktop & Mobile) */}
+        <div className="flex-shrink-0 border-b border-[hsl(var(--border-subtle))] bg-[#111] px-4 py-2 flex items-center justify-between z-20">
+          <div className="flex items-center gap-4">
+             {/* Mobile Sidebar Toggle (only visible on mobile) */}
+             <button 
+                onClick={() => setMobileSidebarOpen(true)}
+                className="md:hidden p-1.5 -ml-1.5 text-[hsl(var(--text-secondary))] hover:text-white rounded-lg hover:bg-white/5"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+              
+              {/* Environment Toggle */}
+              <div className="flex items-center gap-2 bg-black border border-[hsl(var(--border-subtle))] rounded-lg p-1">
+                 <button className="px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 flex items-center gap-1.5 shadow-[0_0_10px_rgba(234,179,8,0.2)]">
+                   <div className="w-1.5 h-1.5 rounded-full bg-yellow-500 animate-pulse" /> Sandbox
+                 </button>
+                 <button className="px-3 py-1 rounded-md text-xs font-bold uppercase tracking-wider text-gray-500 hover:text-gray-300 transition-colors">
+                   Production
+                 </button>
+              </div>
+          </div>
           
-          <div className="flex items-center gap-2">
-            <div 
-              className="flex items-center justify-center w-7 h-7 rounded-lg"
+          <div className="flex items-center gap-4">
+             <span className="text-xs text-gray-400 hidden sm:inline-block">Safe Mode: No emails will be sent.</span>
+             <NotificationCenter />
+             <div 
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white uppercase shadow-inner"
               style={{
                 background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))"
               }}
             >
-              <Zap className="w-3.5 h-3.5 text-white" />
+              A
             </div>
-            <span className="font-bold text-[14px] tracking-tight text-white">Visoora</span>
           </div>
-
-          <div 
-            className="w-7 h-7 rounded-full flex items-center justify-center text-[10.5px] font-bold text-white uppercase shadow-inner"
-            style={{
-              background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))"
-            }}
-          >
-            A
-          </div>
-        </header>
+        </div>
 
         {/* Scrollable Main content view */}
         <main className="flex-1 overflow-y-auto">{children}</main>

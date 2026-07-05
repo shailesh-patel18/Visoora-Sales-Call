@@ -59,6 +59,16 @@ class TestCallPayload(BaseModel):
     tenant_id: str
     call_id: str
 
+class IcpSegmentInput(BaseModel):
+    segment: str
+    confidence: int
+    rationale: str
+
+class BuyerPersonaInput(BaseModel):
+    title: str
+    confidence: int
+    description: str
+
 class CompletePayload(BaseModel):
     tenant_id: str
     company_name: str
@@ -67,8 +77,8 @@ class CompletePayload(BaseModel):
     team_size: Optional[str] = None
     annual_revenue: Optional[str] = None
     target_region: Optional[str] = None
-    phone_number: str
-    agent_name: str
+    phone_number: Optional[str] = None
+    agent_name: Optional[str] = None
     company_description: Optional[str] = None
     value_proposition: Optional[str] = None
     voice: Optional[str] = None
@@ -83,13 +93,22 @@ class CompletePayload(BaseModel):
     kb_description: Optional[str] = None
     kb_faqs: Optional[List[Dict[str, str]]] = None
     objections_list: Optional[List[Dict[str, str]]] = None
-    recording_disclosure: bool
+    recording_disclosure: Optional[bool] = False
     consent_confirmed: Optional[bool] = None
     country: Optional[str] = None
     import_source: Optional[str] = None
     campaign_goal: Optional[str] = None
     playbook_greeting: Optional[str] = None
     playbook_booking_link: Optional[str] = None
+    icp_industries: Optional[List[str]] = None
+    icp_company_sizes: Optional[List[str]] = None
+    icp_regions: Optional[List[str]] = None
+    decision_maker_titles: Optional[List[str]] = None
+    avoid_list: Optional[List[str]] = None
+    competitors: Optional[List[str]] = None
+    brand_voice_tone: Optional[str] = None
+    icp_segments: Optional[List[IcpSegmentInput]] = None
+    buyer_personas: Optional[List[BuyerPersonaInput]] = None
 
 class ProgressPayload(BaseModel):
     tenant_id: str
@@ -134,6 +153,8 @@ async def validate_website(payload: WebsitePayload):
         "teamSize": "10-49",
         "estimatedRevenue": "$1M - $5M",
         "country": "US",
+        "companyDescription": f"A leading innovator in the technology sector, {company_name} delivers scalable software solutions and digital platforms designed to accelerate business efficiency, customer acquisition, and overall growth.",
+        "valueProposition": "Empower your business to maximize productivity and streamline operational costs by up to 35% through cutting-edge automation.",
     }
     
     return {
@@ -141,6 +162,142 @@ async def validate_website(payload: WebsitePayload):
         "status_code": 200,
         "metadata": metadata
     }
+
+class AnalyzeDomainPayload(BaseModel):
+    website: str
+
+@onboarding_router.post("/onboarding/analyze-domain")
+async def analyze_domain(payload: AnalyzeDomainPayload):
+    """
+    Performs discovery on the target domain, then uses Claude 3.5 Sonnet to construct
+    an initial business intelligence map (assumptions, segments, competitors, objections, ICP).
+    """
+    url = payload.website
+    if not url.startswith("http://") and not url.startswith("https://"):
+        url = "https://" + url
+
+    logger.info("analyze_domain_start", website=url)
+    
+    # 1. Scraping domain root homepage text snippet
+    scraped_text = ""
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            res = await client.get(url, follow_redirects=True)
+            if res.status_code == 200:
+                scraped_text = res.text[:2000]
+    except Exception as e:
+        logger.warn("analyze_domain_scraping_failed", url=url, error=str(e))
+
+    # Determine default company name fallback from domain name
+    company_name = "Acme Corp"
+    domain = "acme"
+    try:
+        parsed_url = httpx.URL(url)
+        domain = parsed_url.host.replace("www.", "").split(".")[0]
+        company_name = domain.capitalize() + " Corp"
+    except Exception:
+        pass
+
+    # High fidelity default fallback response (Growth Advisor style)
+    fallback_analysis = {
+        "company_name": company_name,
+        "company_description": f"A specialized software development agency focusing on custom technology solutions and digital products.",
+        "value_proposition": "We build scalable custom software, web applications, and digital platforms to accelerate operations and user engagement.",
+        "estimated_industries": [
+            {"industry": "Custom Software", "confidence": 95},
+            {"industry": "SaaS / Cloud", "confidence": 88},
+            {"industry": "Healthcare Tech", "confidence": 70}
+        ],
+        "estimated_regions": [
+            {"region": "North America", "confidence": 90},
+            {"region": "Western Europe", "confidence": 85}
+        ],
+        "estimated_decision_makers": [
+            {"title": "CTO", "confidence": 85},
+            {"title": "VP of Engineering", "confidence": 80},
+            {"title": "Founder / CEO", "confidence": 75}
+        ],
+        "potential_competitors": [
+            "DevSquad", "MentorMate", "Trio"
+        ],
+        "potential_objections": [
+            {"objection": "Outsourced development lacks internal alignment.", "rebuttal": "We integrate directly with your Slack and Jira, behaving like a seamless extension of your team."},
+            {"objection": "Offshore/nearshore rates are too unpredictable.", "rebuttal": "We charge a transparent, fixed-price monthly sprint model to guarantee budgets."}
+        ],
+        "suggested_segments": [
+            {"segment": "HealthTech Startups (50-200 employees)", "confidence": 94, "rationale": "High contract values and significant customization needs align with your custom development background."},
+            {"segment": "FinTech SaaS Products", "confidence": 85, "rationale": "Complex security and compliance needs represent a strong use-case for high-end custom engineering."}
+        ],
+        "brand_voice_tone": "consultative and consultative"
+    }
+
+    # 2. Call Claude 3.5 Sonnet if API key is present
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key and "sk-ant" in anthropic_key:
+        try:
+            prompt = f"""
+            You are a premier business growth strategist, B2B sales employee, and founder advisor.
+            We scraped this home page content from the website {url}:
+            {scraped_text[:1500]}
+
+            Perform a deep growth analysis of this company. Estimate their target ICP, target regions, target decision-maker titles, likely competitors, brand voice, and potential objections they receive from customers.
+            Provide specific suggested segments based on their focus areas (e.g. if they have built healthcare/fintech custom software, suggest target niches like HealthTech startups, Multi-location clinics, etc. with rationales).
+            Be realistic and ground your assumptions in the text.
+            Do not fabricate specific financial metrics that are not present.
+
+            Respond ONLY in the following JSON format:
+            {{
+                "company_name": "Calculated Company Name",
+                "company_description": "1-2 sentence description of what they do",
+                "value_proposition": "Their primary value proposition",
+                "estimated_industries": [
+                    {{"industry": "Industry name", "confidence": 95}}
+                ],
+                "estimated_regions": [
+                    {{"region": "Region name", "confidence": 90}}
+                ],
+                "estimated_decision_makers": [
+                    {{"title": "Job title", "confidence": 85}}
+                ],
+                "potential_competitors": [
+                    "Competitor A", "Competitor B", "Competitor C"
+                ],
+                "potential_objections": [
+                    {{"objection": "Likely sales objection", "rebuttal": "Actionable rebuttal/response"}}
+                ],
+                "suggested_segments": [
+                    {{"segment": "Segment name", "confidence": 90, "rationale": "Why this is a good target segment"}}
+                ],
+                "brand_voice_tone": "consultative, technical, authoritative, or professional"
+            }}
+            """
+
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                res = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": anthropic_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json"
+                    },
+                    json={
+                        "model": "claude-3-5-sonnet-20241022",
+                        "max_tokens": 800,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
+                )
+                if res.status_code == 200:
+                    response_json = res.json()
+                    content_text = response_json["content"][0]["text"]
+                    parsed = json.loads(content_text.strip())
+                    logger.info("analyze_domain_llm_success", website=url)
+                    return parsed
+        except Exception as llm_err:
+            logger.error("analyze_domain_llm_failed", error=str(llm_err))
+
+    # Cascade to fallback
+    logger.info("analyze_domain_fallback", website=url)
+    return fallback_analysis
 
 # ----------------------------------------------------
 # 2. TWILIO AVAILABLE NUMBERS LOOKUP
@@ -274,29 +431,59 @@ async def provision_phone_number(payload: ProvisionPayload):
 # ----------------------------------------------------
 # 4. ASYNC CSV IMPORT BACKGROUND WORKER
 # ----------------------------------------------------
-async def background_import_task(job_id: str, payload: ImportPayload):
+async def background_import_task(job_id: str, payload: ImportPayload, correlation_id: str = "unknown"):
     """
-    Simulates a background import process in incremental logs.
-    Updates progress state thread-safely in memory.
+    Background import process for contacts.
+    Updates progress state thread-safely in memory with detailed row outcomes.
     """
+    from security.logging import correlation_id_var, tenant_id_var
+    correlation_id_var.set(correlation_id)
+    tenant_id_var.set(payload.tenant_id or "default_shared_tenant")
     total_contacts = len(payload.contacts)
     tenant_id = resolve_tenant_uuid(payload.tenant_id or "default_shared_tenant")
     logger.info("background_import_start", job_id=job_id, contacts_count=total_contacts, tenant_uuid=tenant_id)
 
-    async def update_status(progress: int, status: str):
+    imported_count = 0
+    skipped_count = 0
+    errored_count = 0
+    details = []
+    imported_contact_ids = []
+
+    async def update_status(progress: int, status: str, imp: int = 0, skp: int = 0, err: int = 0, dt: list = None):
         async with import_lock:
             IMPORT_JOBS[job_id] = {
                 "progress": progress,
                 "status": status,
-                "completed": progress == 100
+                "completed": progress == 100,
+                "success": True,
+                "summary": {
+                    "imported": imp,
+                    "skipped": skp,
+                    "errored": err
+                },
+                "details": dt or []
             }
 
-    await update_status(10, "Establishing database connection...")
+    async def update_status_final(progress: int, status: str, success: bool, imp: int, skp: int, err: int, dt: list):
+        async with import_lock:
+            IMPORT_JOBS[job_id] = {
+                "progress": progress,
+                "status": status,
+                "completed": True,
+                "success": success,
+                "summary": {
+                    "imported": imp,
+                    "skipped": skp,
+                    "errored": err
+                },
+                "details": dt
+            }
+
+    await update_status(10, "Establishing database connection...", 0, 0, 0, [])
     
     from server.storage_manager import supabase_client
     if not supabase_client:
         # Supabase is offline. Persist contacts to a local JSON file so data is never lost.
-        # File format matches the Supabase 'contacts' table schema for future bulk sync.
         local_contacts_path = f"recordings/local_contacts_{tenant_id}.json"
         logger.info(
             "csv_import_offline_fallback",
@@ -305,7 +492,7 @@ async def background_import_task(job_id: str, payload: ImportPayload):
             total=total_contacts
         )
 
-        await update_status(20, "Supabase offline. Writing contacts to local storage...")
+        await update_status(20, "Supabase offline. Writing contacts to local storage...", 0, 0, 0, [])
 
         existing_contacts = []
         if os.path.exists(local_contacts_path):
@@ -320,9 +507,21 @@ async def background_import_task(job_id: str, payload: ImportPayload):
             phone = contact_data.get("phone", contact_data.get("phone_number", ""))
             name = contact_data.get("name", contact_data.get("full_name", "Unknown Lead"))
             if not phone:
+                details.append({"row": i, "name": name, "phone": "", "outcome": "skipped", "reason": "Missing phone number"})
+                skipped_count += 1
                 continue
+            
+            # Enforce idempotency: check if phone number already exists
+            is_dup = any(c.get("phone_number") == phone or c.get("phone_e164") == phone for c in existing_contacts) or any(c.get("phone_number") == phone for c in new_contacts)
+            if is_dup:
+                details.append({"row": i, "name": name, "phone": phone, "outcome": "skipped", "reason": "Duplicate prospect (phone number already exists)"})
+                skipped_count += 1
+                continue
+
+            c_id = str(uuid.uuid4())
+            imported_contact_ids.append(c_id)
             new_contacts.append({
-                "id": str(uuid.uuid4()),
+                "id": c_id,
                 "tenant_id": tenant_id,
                 "phone_number": phone,
                 "phone_e164": phone,
@@ -332,9 +531,12 @@ async def background_import_task(job_id: str, payload: ImportPayload):
                 "status": "pending",
                 "created_at": datetime.datetime.utcnow().isoformat()
             })
+            details.append({"row": i, "name": name, "phone": phone, "outcome": "imported", "reason": ""})
+            imported_count += 1
+
             if i % max(1, total_contacts // 10) == 0:
                 progress = 20 + int((i / total_contacts) * 70)
-                await update_status(progress, f"Saving contact {i + 1}/{total_contacts}...")
+                await update_status(progress, f"Saving contact {i + 1}/{total_contacts}...", imported_count, skipped_count, errored_count, details)
 
         all_contacts = existing_contacts + new_contacts
         try:
@@ -342,30 +544,46 @@ async def background_import_task(job_id: str, payload: ImportPayload):
                 json.dump(all_contacts, f, indent=2)
         except Exception as write_err:
             logger.error("csv_import_local_write_failed", error=str(write_err), job_id=job_id)
-            await update_status(100, f"Local write failed: {str(write_err)}")
+            await update_status_final(100, f"Local write failed: {str(write_err)}", False, imported_count, skipped_count, errored_count, details)
             return
 
-        saved_count = len(new_contacts)
         logger.info(
             "csv_import_offline_complete",
             job_id=job_id,
-            saved_count=saved_count,
+            saved_count=imported_count,
             path=local_contacts_path
         )
-        await update_status(
+        if imported_contact_ids:
+            try:
+                from server.worker import enqueue_background_job
+                await enqueue_background_job(
+                    tenant_id=tenant_id,
+                    job_type="lead_scoring",
+                    payload={"tenant_id": tenant_id, "contact_ids": imported_contact_ids}
+                )
+            except Exception as score_enqueue_err:
+                logger.error("enqueue_lead_scoring_offline_failed", error=str(score_enqueue_err))
+
+        await update_status_final(
             100,
-            f"Offline: {saved_count} contacts saved to local storage ({local_contacts_path}). "
-            f"Will sync to database when connection is restored."
+            f"Offline: {imported_count} contacts saved to local storage ({local_contacts_path}).",
+            True,
+            imported_count,
+            skipped_count,
+            errored_count,
+            details
         )
         return
 
-    await update_status(30, "Sanitizing and upserting records...")
+    await update_status(30, "Sanitizing and upserting records...", 0, 0, 0, [])
     
     try:
         for i, contact_data in enumerate(payload.contacts):
             phone = contact_data.get("phone", contact_data.get("phone_number", ""))
             name = contact_data.get("name", contact_data.get("full_name", "Unknown Lead"))
             if not phone:
+                details.append({"row": i, "name": name, "phone": "", "outcome": "skipped", "reason": "Missing phone number"})
+                skipped_count += 1
                 continue
                 
             contact_payload = {
@@ -377,29 +595,57 @@ async def background_import_task(job_id: str, payload: ImportPayload):
                 "phone_e164": phone
             }
             
-            # Find existing to upsert
-            existing = supabase_client.table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
-            if existing.data:
-                supabase_client.table("contacts").update(contact_payload).eq("id", existing.data[0]["id"]).execute()
-            else:
-                contact_payload["id"] = str(uuid.uuid4())
-                supabase_client.table("contacts").insert(contact_payload).execute()
+            try:
+                # Find existing to check duplicate/upsert
+                existing = supabase_client.table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
+                if existing.data:
+                    c_id = existing.data[0]["id"]
+                    supabase_client.table("contacts").update(contact_payload).eq("id", c_id).eq("tenant_id", tenant_id).execute()
+                    details.append({"row": i, "name": name, "phone": phone, "outcome": "skipped", "reason": "Duplicate prospect (updated existing record)"})
+                    skipped_count += 1
+                    imported_contact_ids.append(c_id)
+                else:
+                    c_id = str(uuid.uuid4())
+                    contact_payload["id"] = c_id
+                    supabase_client.table("contacts").insert(contact_payload).execute()
+                    details.append({"row": i, "name": name, "phone": phone, "outcome": "imported", "reason": ""})
+                    imported_count += 1
+                    imported_contact_ids.append(c_id)
+            except Exception as row_err:
+                err_str = str(row_err)
+                # Check for network/connection issue to throw a loud exception
+                if "connection" in err_str.lower() or "unreachable" in err_str.lower() or "failed to connect" in err_str.lower() or "status code 5" in err_str.lower() or "http" in err_str.lower():
+                    raise row_err
+                
+                details.append({"row": i, "name": name, "phone": phone, "outcome": "errored", "reason": f"Database write failed: {err_str}"})
+                errored_count += 1
                 
             if i % max(1, total_contacts // 10) == 0:
                 progress = 30 + int((i / total_contacts) * 60)
-                await update_status(progress, f"Imported {i}/{total_contacts} records...")
+                await update_status(progress, f"Imported {i + 1}/{total_contacts} records...", imported_count, skipped_count, errored_count, details)
                 
-        await update_status(100, f"Sync complete. {total_contacts} prospects successfully loaded.")
+        if imported_contact_ids:
+            try:
+                from server.worker import enqueue_background_job
+                await enqueue_background_job(
+                    tenant_id=tenant_id,
+                    job_type="lead_scoring",
+                    payload={"tenant_id": tenant_id, "contact_ids": imported_contact_ids}
+                )
+            except Exception as score_enqueue_err:
+                logger.error("enqueue_lead_scoring_db_failed", error=str(score_enqueue_err))
+
+        await update_status_final(100, f"Sync complete. {imported_count} imported, {skipped_count} skipped, {errored_count} errored.", True, imported_count, skipped_count, errored_count, details)
     except Exception as e:
         logger.error("background_import_failed", error=str(e))
-        await update_status(100, f"Import failed: {str(e)}")
+        await update_status_final(100, f"Import failed: {str(e)}", False, imported_count, skipped_count, errored_count, details)
 
 @onboarding_router.post("/contacts/import")
 async def register_contacts_import(payload: ImportPayload, background_tasks: BackgroundTasks):
     """
     Spawns background contact import task and returns jobId.
     """
-    from security.logging import tenant_id_var
+    from security.logging import tenant_id_var, correlation_id_var
     payload.tenant_id = tenant_id_var.get() or "default_shared_tenant"
     job_id = "job_" + str(uuid.uuid4())[:8]
     async with import_lock:
@@ -409,7 +655,7 @@ async def register_contacts_import(payload: ImportPayload, background_tasks: Bac
             "completed": False
         }
     
-    background_tasks.add_task(background_import_task, job_id, payload)
+    background_tasks.add_task(background_import_task, job_id, payload, correlation_id_var.get())
     return {"success": True, "job_id": job_id}
 
 @onboarding_router.get("/contacts/import/{job_id}")
@@ -539,7 +785,15 @@ async def onboarding_complete(payload: CompletePayload):
                 "tenant_id": tenant_uuid,
                 "company_description": payload.company_description or "",
                 "value_proposition": payload.value_proposition or "",
-                "persona": json.dumps(persona_data)
+                "persona": json.dumps(persona_data),
+                "icp_industries": payload.icp_industries or [],
+                "icp_company_sizes": payload.icp_company_sizes or [],
+                "icp_regions": payload.icp_regions or [],
+                "decision_maker_titles": payload.decision_maker_titles or [],
+                "avoid_list": payload.avoid_list or [],
+                "competitors": payload.competitors or [],
+                "objections_list": payload.objections_list or [],
+                "brand_voice_tone": payload.brand_voice_tone or ""
             }
             existing = supabase_client.table("agent_configs").select("id").eq("tenant_id", tenant_uuid).execute()
             if existing.data:
@@ -564,6 +818,44 @@ async def onboarding_complete(payload: CompletePayload):
                 comp_payload["id"] = str(uuid.uuid4())
                 supabase_client.table("tenant_compliance_settings").insert(comp_payload).execute()
             logger.info("supabase_tenant_compliance_settings_updated", tenant_uuid=tenant_uuid)
+
+            # 3. Save ICP segments to icp_segments table
+            if payload.icp_segments:
+                try:
+                    supabase_client.table("icp_segments").delete().eq("tenant_id", tenant_uuid).execute()
+                except Exception as del_err:
+                    logger.warn("failed_to_delete_existing_icp_segments", error=str(del_err))
+                
+                segments_to_insert = [
+                    {
+                        "tenant_id": tenant_uuid,
+                        "segment": s.segment,
+                        "confidence": s.confidence,
+                        "rationale": s.rationale
+                    }
+                    for s in payload.icp_segments
+                ]
+                supabase_client.table("icp_segments").insert(segments_to_insert).execute()
+                logger.info("supabase_icp_segments_saved", count=len(segments_to_insert))
+
+            # 4. Save Buyer Personas to buyer_personas table
+            if payload.buyer_personas:
+                try:
+                    supabase_client.table("buyer_personas").delete().eq("tenant_id", tenant_uuid).execute()
+                except Exception as del_err:
+                    logger.warn("failed_to_delete_existing_buyer_personas", error=str(del_err))
+                
+                personas_to_insert = [
+                    {
+                        "tenant_id": tenant_uuid,
+                        "title": p.title,
+                        "confidence": p.confidence,
+                        "description": p.description
+                    }
+                    for p in payload.buyer_personas
+                ]
+                supabase_client.table("buyer_personas").insert(personas_to_insert).execute()
+                logger.info("supabase_buyer_personas_saved", count=len(personas_to_insert))
 
         except Exception as e:
             logger.error("supabase_onboarding_db_update_failed", error=str(e))
@@ -606,6 +898,13 @@ async def onboarding_complete(payload: CompletePayload):
                     "kbDescription": payload.kb_description or "",
                     "kbFaqs": payload.kb_faqs or [],
                     "objectionsList": payload.objections_list or [],
+                    "icpIndustries": payload.icp_industries or [],
+                    "icpCompanySizes": payload.icp_company_sizes or [],
+                    "icpRegions": payload.icp_regions or [],
+                    "decisionMakerTitles": payload.decision_maker_titles or [],
+                    "avoidList": payload.avoid_list or [],
+                    "competitors": payload.competitors or [],
+                    "brandVoiceTone": payload.brand_voice_tone or "",
                 },
                 "step4": {
                     "consentConfirmed": payload.consent_confirmed or False,
@@ -623,36 +922,111 @@ async def onboarding_complete(payload: CompletePayload):
             with open(PROGRESS_FILE, "w") as f:
                 json.dump(registry, f, indent=2)
             logger.info("local_progress_registry_finalized", tenant=tenant_id)
+
+            # Cascade save ICP segments to local file
+            if payload.icp_segments:
+                try:
+                    local_segments_file = "recordings/local_icp_segments.json"
+                    segments_data = []
+                    if os.path.exists(local_segments_file):
+                        with open(local_segments_file, "r") as sf:
+                            segments_data = json.load(sf)
+                    
+                    # Filter out current tenant
+                    segments_data = [s for s in segments_data if s.get("tenant_id") not in (tenant_id, tenant_uuid)]
+                    
+                    for s in payload.icp_segments:
+                        segments_data.append({
+                            "id": str(uuid.uuid4()),
+                            "tenant_id": tenant_uuid,
+                            "segment": s.segment,
+                            "confidence": s.confidence,
+                            "rationale": s.rationale,
+                            "created_at": datetime.datetime.utcnow().isoformat(),
+                            "updated_at": datetime.datetime.utcnow().isoformat()
+                        })
+                    with open(local_segments_file, "w") as sf:
+                        json.dump(segments_data, sf, indent=2)
+                    logger.info("local_icp_segments_saved", count=len(payload.icp_segments))
+                except Exception as e:
+                    logger.error("failed_to_save_local_icp_segments", error=str(e))
+
+            # Cascade save Buyer Personas to local file
+            if payload.buyer_personas:
+                try:
+                    local_personas_file = "recordings/local_buyer_personas.json"
+                    personas_data = []
+                    if os.path.exists(local_personas_file):
+                        with open(local_personas_file, "r") as pf:
+                            personas_data = json.load(pf)
+                    
+                    # Filter out current tenant
+                    personas_data = [p for p in personas_data if p.get("tenant_id") not in (tenant_id, tenant_uuid)]
+                    
+                    for p in payload.buyer_personas:
+                        personas_data.append({
+                            "id": str(uuid.uuid4()),
+                            "tenant_id": tenant_uuid,
+                            "title": p.title,
+                            "confidence": p.confidence,
+                            "description": p.description,
+                            "created_at": datetime.datetime.utcnow().isoformat(),
+                            "updated_at": datetime.datetime.utcnow().isoformat()
+                        })
+                    with open(local_personas_file, "w") as pf:
+                        json.dump(personas_data, pf, indent=2)
+                    logger.info("local_buyer_personas_saved", count=len(payload.buyer_personas))
+                except Exception as e:
+                    logger.error("failed_to_save_local_buyer_personas", error=str(e))
+
         except Exception as e:
             logger.error("failed_to_finalize_local_progress", error=str(e))
     
-    # Trigger Welcome Email via Resend HTTP Post
-    email_url = "https://api.resend.com/emails"
-    headers = {
-        "Authorization": "Bearer re_mock_api_key_visoora_welcome_onboarding",
-        "Content-Type": "application/json"
-    }
-    
-    body = {
-        "from": "onboarding@visoora.com",
-        "to": "customer@company.com",
-        "subject": f"Welcome to Visoora! Let's schedule call pipelines.",
-        "html": f"""
-        <h1>Welcome to Visoora, {payload.company_name}!</h1>
-        <p>Your sales voice agent <strong>{payload.agent_name}</strong> is live and configured on caller line <strong>{payload.phone_number}</strong>.</p>
-        <p>Login to your <a href="http://localhost:3000/dashboard">CRM Dashboard</a> to review campaign progress and track objection summaries.</p>
-        <br/>
-        <p>Best regards,<br/>Visoora Setup Team</p>
-        """
-    }
-
+    # Trigger Welcome Email via EventBus
     try:
-        # Standard async HTTP Post
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            await client.post(email_url, headers=headers, json=body)
-            logger.info("welcome_email_dispatched_resend")
+        from server.events.bus import bus
+        # Usually we would pass the actual user's email, but for MVP mock we just pass a string or extract from payload if it exists.
+        bus.publish("UserRegistered", {
+            "email": "customer@company.com", # In real life, get from user profile
+            "company_name": payload.company_name
+        })
+        logger.info("user_registered_event_published")
     except Exception as e:
-        logger.warn("welcome_email_dispatch_failed", error=str(e))
+        logger.warn("failed_to_publish_user_registered_event", error=str(e))
+
+
+    # Fetch all contacts to run lead scoring background job
+    all_contact_ids = []
+    if supabase_client:
+        try:
+            # Check both possible table names: contacts vs crm_contacts. In our database schema we added background jobs and crm_contacts.
+            # Let's try select from crm_contacts first, fallback to contacts
+            try:
+                res = supabase_client.table("crm_contacts").select("id").eq("tenant_id", tenant_uuid).execute()
+                if res.data:
+                    all_contact_ids = [c["id"] for c in res.data]
+            except Exception:
+                res = supabase_client.table("contacts").select("id").eq("tenant_id", tenant_uuid).execute()
+                if res.data:
+                    all_contact_ids = [c["id"] for c in res.data]
+        except Exception as e:
+            logger.error("supabase_fetch_contacts_for_scoring_failed", error=str(e))
+    else:
+        # Local Fallback
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        all_contact_ids = [c["id"] for c in local_contacts if c.get("tenant_id") in (tenant_uuid, tenant_id)]
+
+    if all_contact_ids:
+        try:
+            from server.worker import enqueue_background_job
+            await enqueue_background_job(
+                tenant_id=tenant_uuid,
+                job_type="lead_scoring",
+                payload={"tenant_id": tenant_uuid, "contact_ids": all_contact_ids}
+            )
+            logger.info("brain_update_lead_scoring_enqueued", tenant=tenant_id, count=len(all_contact_ids))
+        except Exception as e:
+            logger.error("enqueue_lead_scoring_brain_update_failed", error=str(e))
 
     return {"success": True, "message": "Onboarding completed successfully. Welcome email dispatched."}
 

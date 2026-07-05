@@ -1,11 +1,15 @@
 from typing import Any, Dict, List, Optional
+import os
 import uuid
 import time
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
-from fastapi.responses import RedirectResponse
+import json
+import datetime
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, Request, status
+from fastapi.responses import RedirectResponse, HTMLResponse
 from pydantic import BaseModel, Field
+import structlog
 
-from security.rbac import RoleChecker, UserPrincipal
+from security.rbac import RoleChecker, UserPrincipal, get_current_user
 from sales_employee.services import (
     AgentCreate,
     LeadCreate,
@@ -16,6 +20,7 @@ from sales_employee.services import (
     knowledge_service,
     require_tenant_id,
     store,
+    utc_now,
 )
 from sales_employee.mailbox_manager import (
     list_mailboxes,
@@ -24,11 +29,22 @@ from sales_employee.mailbox_manager import (
     disconnect_mailbox,
     verify_mailbox,
     get_default_mailbox,
+    refresh_oauth_token_if_needed,
+    enforce_mailbox_rate_limits,
 )
 from sales_employee.followup_engine import ai_followup_engine
 from sales_employee.email_generator import ai_email_generator
 from sales_employee.email_timeline import get_or_create_thread, add_message_to_thread
-from sales_employee.delivery_tracker import track_delivery_event, track_open_event, track_reply_event
+from sales_employee.delivery_tracker import (
+    track_delivery_event,
+    track_open_event,
+    track_reply_event,
+    verify_sendgrid_signature,
+    check_replay_and_deduplicate,
+)
+from server.storage_manager import supabase_client
+
+logger = structlog.get_logger("visoora_sales_employee_router")
 
 sales_employee_router = APIRouter(
     prefix="/api/v1/sales-employee",
@@ -36,8 +52,30 @@ sales_employee_router = APIRouter(
     dependencies=[Depends(RoleChecker(["agent", "admin"]))],
 )
 
+# Separate public router for unsubscribe links (no RBAC check)
+public_sales_router = APIRouter(
+    prefix="/api/v1/sales-employee",
+    tags=["AI Sales Employee Public"],
+)
 
-def tenant_from_header(x_tenant_id: str = Header(..., alias="X-Tenant-ID")) -> str:
+
+def tenant_from_header(
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+    user: UserPrincipal = Depends(get_current_user)
+) -> str:
+    if not x_tenant_id:
+        raise HTTPException(
+            status_code=400,
+            detail="X-Tenant-ID header is required."
+        )
+
+    # Enforce isolation for human users:
+    if not user.is_m2m and x_tenant_id != user.tenant_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Forbidden: Tenant context mismatch. Token tenant '{user.tenant_id}' does not match requested tenant '{x_tenant_id}'."
+        )
+
     try:
         return require_tenant_id(x_tenant_id)
     except ValueError as exc:
@@ -195,7 +233,10 @@ async def draft_email(lead_id: str, tenant_id: str = Depends(tenant_from_header)
         raise HTTPException(status_code=404, detail="Lead not found.")
     lead = leads[0]
     history = history_service.list_for_lead(tenant_id, lead_id)
-    return ai_email_generator.generate_followup(tenant_id, lead["agent_id"], lead, history)
+    
+    # Use configure domain base URL
+    public_base_url = os.getenv("SERVER_PUBLIC_DOMAIN", "http://localhost:8000")
+    return ai_email_generator.generate_followup(tenant_id, lead["agent_id"], lead, history, public_base_url=public_base_url)
 
 
 @sales_employee_router.post("/leads/{lead_id}/emails/send")
@@ -204,8 +245,40 @@ async def send_email(lead_id: str, tenant_id: str = Depends(tenant_from_header))
     if not leads:
         raise HTTPException(status_code=404, detail="Lead not found.")
     lead = leads[0]
+    
+    # Deterministic Guardrail 1: Unsubscribe / Stopped status check
+    follow_up_status = lead.get("follow_up_status", "").lower()
+    lead_status = lead.get("status", "").lower()
+    if follow_up_status == "stopped" or lead_status == "unsubscribed" or follow_up_status == "unsubscribed":
+        raise HTTPException(status_code=400, detail="Outreach blocked: Prospect has unsubscribed.")
+        
+    # Deterministic Guardrail 2: Stop-on-company-reply check
+    company_name = lead.get("company_name", "")
+    if company_name:
+        try:
+            all_leads = store.list("leads", tenant_id)
+        except Exception:
+            all_leads = []
+        company_leads = [l for l in all_leads if l.get("company_name", "").lower() == company_name.lower()]
+        for cl in company_leads:
+            try:
+                cl_history = history_service.list_for_lead(tenant_id, cl["id"])
+            except Exception:
+                cl_history = []
+            replied = any(h.get("channel") == "email" and h.get("direction") == "inbound" for h in cl_history)
+            if replied:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Outreach blocked: another contact from the same company has replied."
+                )
+                
     history = history_service.list_for_lead(tenant_id, lead_id)
     
+    # Deterministic Guardrail 3: Outbound cap limit (5 touches)
+    outbound_touches = [h for h in history if h.get("direction") == "outbound" and h.get("channel") in {"call", "email"}]
+    if len(outbound_touches) >= 5:
+        raise HTTPException(status_code=400, detail="Outbound touch cap (5) reached. Outreach is blocked.")
+        
     # Assert outreach next best action
     decision = ai_followup_engine.decide_next_action(lead, history, {})
     ai_followup_engine.log_reasoning(tenant_id, lead_id, {"lead": lead, "history": history}, decision)
@@ -223,31 +296,92 @@ async def send_email(lead_id: str, tenant_id: str = Depends(tenant_from_header))
     # Retrieve previous message ID if threading
     prev_msg_id = thread.get("message_ids")[-1] if thread.get("message_ids") else None
     
-    # Generate draft with subject aligning with the thread
+    # Resolve public base URL
+    public_base_url = os.getenv("SERVER_PUBLIC_DOMAIN", "http://localhost:8000")
+    
+    # Generate draft with subject aligning with the thread and unsubscribe links
     draft = ai_email_generator.generate_followup(
         tenant_id=tenant_id,
         agent_id=lead["agent_id"],
         lead=lead,
         history=history,
         original_subject=thread.get("subject"),
+        public_base_url=public_base_url,
     )
     
+    extra_headers = {
+        "List-Unsubscribe": f"<{public_base_url}/api/v1/sales-employee/leads/unsubscribe?lead_id={lead_id}>"
+    }
+    
     if mailbox:
-        # Route dispatch through tenant's verified mailbox
+        # Enforce rate limits (sending gap and cap checks)
+        await enforce_mailbox_rate_limits(tenant_id, mailbox["id"])
+        
+        # Check and auto-refresh credentials if expiring
+        mailbox = await refresh_oauth_token_if_needed(tenant_id, mailbox["id"])
+        
         from sales_employee.email_provider import send_via_mailbox
-        result = await send_via_mailbox(
-            mailbox=mailbox,
-            to_email=lead["email"],
-            subject=draft.subject,
-            body=draft.body,
-            prev_msg_id=prev_msg_id,
-        )
+        try:
+            result = await send_via_mailbox(
+                mailbox=mailbox,
+                to_email=lead["email"],
+                subject=draft.subject,
+                body=draft.body,
+                prev_msg_id=prev_msg_id,
+                extra_headers=extra_headers,
+            )
+        except Exception as exc:
+            # Token refresh retry loop (if token expired/revoked mid-campaign)
+            if "unauthorized" in str(exc).lower() or "expired" in str(exc).lower() or "401" in str(exc).lower():
+                logger.info("send_email_unauthorized_token_retry", error=str(exc))
+                # Attempt forced refresh once
+                mailbox = await refresh_oauth_token_if_needed(tenant_id, mailbox["id"])
+                try:
+                    result = await send_via_mailbox(
+                        mailbox=mailbox,
+                        to_email=lead["email"],
+                        subject=draft.subject,
+                        body=draft.body,
+                        prev_msg_id=prev_msg_id,
+                        extra_headers=extra_headers,
+                    )
+                except Exception as retry_exc:
+                    # Token refresh failed, escalate to human
+                    store.update("leads", tenant_id, lead_id, {"needs_review": True, "follow_up_status": "escalated"})
+                    history_service.add(
+                        tenant_id, lead_id, "email", "outbound", "failed", "",
+                        {"error": f"Mailbox credentials invalid: {retry_exc}"}
+                    )
+                    raise HTTPException(status_code=400, detail=f"Mailbox token refresh failed. Outbound outreach escalated to human review.")
+            else:
+                # Other connection failures, escalate to human
+                store.update("leads", tenant_id, lead_id, {"needs_review": True, "follow_up_status": "escalated"})
+                history_service.add(
+                    tenant_id, lead_id, "email", "outbound", "failed", "",
+                    {"error": f"Mailbox dispatch failed: {exc}"}
+                )
+                raise HTTPException(status_code=400, detail=f"Mailbox send failed: {exc}. Outreach escalated to human review.")
     else:
-        # Fallback to SendGrid default sender address for testing/dev environments
-        result = await delivery_adapter.send(lead["email"], draft.subject, draft.body)
+        # Fallback to SendGrid default sender address ONLY allowed for testing/development environments
+        app_env = os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower()
+        if app_env in ("development", "test"):
+            result = await delivery_adapter.send(lead["email"], draft.subject, draft.body)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="No connected mailbox configured for this workspace. Outbound email is blocked in production."
+            )
         
     msg_id = result.get("message_id", f"msg_{uuid.uuid4()}")
     add_message_to_thread(tenant_id, thread["id"], msg_id)
+    
+    # Increment total touches on lead
+    total_touches = lead.get("total_touches", 0) + 1
+    store.update("leads", tenant_id, lead_id, {
+        "total_touches": total_touches,
+        "last_touch_at": utc_now(),
+        "last_touch_channel": "email"
+    })
     
     # Log sent outreach event in lead timeline history
     return history_service.add(
@@ -270,9 +404,29 @@ async def send_email(lead_id: str, tenant_id: str = Depends(tenant_from_header))
 # DELIVERY WEBHOOK RECEIVERS
 # ====================================================
 @sales_employee_router.post("/webhooks/sendgrid/events")
-async def sendgrid_events(events: List[Dict[str, Any]], tenant_id: str = Depends(tenant_from_header)):
+async def sendgrid_events(
+    request: Request,
+    signature: Optional[str] = Header(None, alias="X-Twilio-Email-Event-Webhook-Signature"),
+    timestamp: Optional[str] = Header(None, alias="X-Twilio-Email-Event-Webhook-Timestamp"),
+    tenant_id: str = Depends(tenant_from_header)
+):
+    body_bytes = await request.body()
+    
+    # 1. Verify webhook signature
+    if signature and timestamp:
+        if not verify_sendgrid_signature(signature, timestamp, body_bytes):
+            raise HTTPException(status_code=401, detail="Invalid SendGrid webhook signature")
+            
+    events = json.loads(body_bytes)
     written = []
     for event in events:
+        event_id = event.get("sg_event_id") or str(uuid.uuid4())
+        event_timestamp = float(event.get("timestamp", time.time()))
+        
+        # 2. Replay and Deduplication Checks
+        if not check_replay_and_deduplicate(event_id, event_timestamp):
+            continue
+            
         lead_id = event.get("lead_id") or event.get("custom_args", {}).get("lead_id")
         if lead_id:
             written.append(
@@ -290,7 +444,23 @@ async def sendgrid_events(events: List[Dict[str, Any]], tenant_id: str = Depends
 
 
 @sales_employee_router.post("/webhooks/email/replies")
-async def inbound_reply(payload: Dict[str, Any], tenant_id: str = Depends(tenant_from_header)):
+async def inbound_reply(
+    payload: Dict[str, Any], 
+    secret: Optional[str] = None,
+    tenant_id: str = Depends(tenant_from_header)
+):
+    # Shared secret query verify
+    expected_secret = os.getenv("WEBHOOK_SHARED_SECRET", "mock_secret")
+    if secret != expected_secret and os.getenv("APP_ENV") != "test":
+        raise HTTPException(status_code=401, detail="Unauthorized shared secret mismatch")
+        
+    event_id = payload.get("message_id") or str(uuid.uuid4())
+    event_timestamp = float(payload.get("timestamp", time.time()))
+    
+    # Replay protection
+    if not check_replay_and_deduplicate(event_id, event_timestamp):
+        raise HTTPException(status_code=409, detail="Duplicate or replay webhook rejected")
+        
     lead_id = payload.get("lead_id")
     if not lead_id:
         raise HTTPException(status_code=400, detail="lead_id is required.")
@@ -323,3 +493,106 @@ async def lead_timeline(lead_id: str, tenant_id: str = Depends(tenant_from_heade
     return history_service.list_for_lead(tenant_id, lead_id)
 
 
+# ====================================================
+# PUBLIC ROUTES (No RBAC dependency)
+# ====================================================
+@public_sales_router.get("/leads/unsubscribe")
+async def unsubscribe_lead(lead_id: str):
+    """
+    Public opt-out endpoint accessed by prospects via unsubscribe link.
+    Sets follow_up_status = "stopped" and status = "unsubscribed".
+    """
+    from crm.auto_advance import _load_local_json, _save_local_json
+    
+    # 1. Update in local leads database file
+    leads = _load_local_json("leads.json")
+    found = False
+    for l in leads:
+        if l.get("id") == lead_id:
+            l["follow_up_status"] = "stopped"
+            l["status"] = "unsubscribed"
+            found = True
+            
+            # Record unsubscribe event in timeline
+            history_service.add(
+                tenant_id=l.get("tenant_id", "acme_tenant"),
+                lead_id=lead_id,
+                channel="email",
+                direction="inbound",
+                status="unsubscribed",
+                content_ref="unsubscribe_link",
+                metadata={"unsubscribed": True}
+            )
+            break
+            
+    if found:
+        _save_local_json("leads.json", leads)
+        
+        # 2. Update in Supabase DB if configured
+        if supabase_client:
+            try:
+                supabase_client.table("leads").update({
+                    "follow_up_status": "stopped",
+                    "status": "unsubscribed"
+                }).eq("id", lead_id).execute()
+            except Exception as exc:
+                logger.error("supabase_unsubscribe_db_write_failed", error=str(exc))
+                
+        # Return a premium success confirmation page
+        return HTMLResponse(content="""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Unsubscribed Successfully</title>
+                <style>
+                    body {
+                        background: #0a0a0a;
+                        color: #ffffff;
+                        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        height: 100vh;
+                        margin: 0;
+                    }
+                    .container {
+                        background: rgba(255, 255, 255, 0.02);
+                        border: 1px solid rgba(255, 255, 255, 0.08);
+                        padding: 40px;
+                        border-radius: 16px;
+                        text-align: center;
+                        max-width: 420px;
+                        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+                        backdrop-filter: blur(8px);
+                    }
+                    .icon {
+                        font-size: 32px;
+                        margin-bottom: 16px;
+                        color: #10b981;
+                    }
+                    h1 {
+                        font-size: 20px;
+                        font-weight: 700;
+                        margin: 0 0 12px 0;
+                        letter-spacing: -0.5px;
+                    }
+                    p {
+                        color: #888888;
+                        font-size: 13px;
+                        line-height: 1.6;
+                        margin: 0;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="icon">✓</div>
+                    <h1>Outreach Discontinued</h1>
+                    <p>You have been successfully unsubscribed. Visoora has permanently stopped all automated sales follow-ups for your profile.</p>
+                </div>
+            </body>
+            </html>
+        """)
+        
+    raise HTTPException(status_code=404, detail="Lead not found")

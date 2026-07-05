@@ -14,6 +14,7 @@ class CallStateContext(BaseModel):
     company_name: str = "Global Corp"
     is_terminal: bool = False
     rag_context: Optional[str] = None  # Pre-call memory brief from MemoryManager
+    conversation_plan: Optional[Dict] = None # Phase 4 dynamic plan injection
 
 def get_tenant_config(tenant_id: str) -> dict:
     from server.storage_manager import supabase_client
@@ -38,6 +39,14 @@ def get_tenant_config(tenant_id: str) -> dict:
                 return {
                     "company_description": row.get("company_description") or "",
                     "value_proposition": row.get("value_proposition") or "",
+                    "icp_industries": row.get("icp_industries") or [],
+                    "icp_company_sizes": row.get("icp_company_sizes") or [],
+                    "icp_regions": row.get("icp_regions") or [],
+                    "decision_maker_titles": row.get("decision_maker_titles") or [],
+                    "avoid_list": row.get("avoid_list") or [],
+                    "competitors": row.get("competitors") or [],
+                    "objections_list": row.get("objections_list") or [],
+                    "brand_voice_tone": row.get("brand_voice_tone") or "",
                     **persona_data
                 }
         except Exception as e:
@@ -76,6 +85,13 @@ def get_tenant_config(tenant_id: str) -> dict:
                     "kb_description": s3.get("kbDescription") or "",
                     "kb_faqs": s3.get("kbFaqs") or [],
                     "objections_list": s3.get("objectionsList") or [],
+                    "icp_industries": s3.get("icpIndustries") or [],
+                    "icp_company_sizes": s3.get("icpCompanySizes") or [],
+                    "icp_regions": s3.get("icpRegions") or [],
+                    "decision_maker_titles": s3.get("decisionMakerTitles") or [],
+                    "avoid_list": s3.get("avoidList") or [],
+                    "competitors": s3.get("competitors") or [],
+                    "brand_voice_tone": s3.get("brandVoiceTone") or "",
                     "campaign_goal": s5.get("campaignGoal") or "",
                     "playbook_greeting": s5.get("playbookGreeting") or "",
                     "playbook_booking_link": s5.get("playbookBookingLink") or "",
@@ -121,10 +137,19 @@ class StateMachineController:
             except Exception as exc:
                 print(f"[States Config] Sales employee context load failed: {exc}")
         
+        # Inject Phase 4 Conversation Plan
+        conversation_plan = initial_metadata.get("conversation_plan")
+        if conversation_plan:
+            self.config["conversation_plan"] = conversation_plan
+            # Override playbook details with dynamic plan
+            if "opening" in conversation_plan:
+                self.config["playbook_greeting"] = conversation_plan["opening"]
+        
         self.context = CallStateContext(
             lead_metadata=initial_metadata,
             prospect_name=prospect_name,
-            company_name=company_name
+            company_name=company_name,
+            conversation_plan=conversation_plan
         )
         
     def validate_and_transition(self, next_state: str) -> bool:

@@ -99,6 +99,8 @@ export default function ContactsPage() {
   const [dialing, setDialing] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isLoadingContacts, setIsLoadingContacts] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
 
   // New Contact Form State
   const [newName, setNewName] = useState("");
@@ -125,7 +127,6 @@ export default function ContactsPage() {
     }
 
     const payload = {
-      tenant_id: "acme_tenant",
       phone_e164: phoneFormatted,
       full_name: newName.trim(),
       company_name: newCompany.trim() || "Independent",
@@ -163,6 +164,8 @@ export default function ContactsPage() {
   };
 
   const fetchContacts = async () => {
+    setIsLoadingContacts(true);
+    setFetchError(false);
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
         headers: getAuthHeaders()
@@ -170,9 +173,14 @@ export default function ContactsPage() {
       if (res.ok) {
         const data = await res.json();
         setContacts(data || []);
+      } else {
+        setFetchError(true);
       }
     } catch (err) {
       console.warn("Failed to fetch contacts:", err);
+      setFetchError(true);
+    } finally {
+      setIsLoadingContacts(false);
     }
   };
 
@@ -327,28 +335,28 @@ export default function ContactsPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ background: "hsl(var(--surface-2))" }}>
+              <tr style={{ background: "hsl(var(--surface-2))", borderColor: "hsl(var(--border-subtle))" }} className="border-b transition-colors">
                 <th className="px-4 py-3 text-left w-10">
-                  <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded accent-emerald-500" />
+                  <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="rounded accent-emerald-500 bg-black border-[hsl(var(--border-default))] cursor-pointer" />
                 </th>
                 <th className="px-4 py-3 text-left">
-                  <button onClick={() => toggleSort("full_name")} className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>
-                    Contact <ArrowUpDown className="w-3 h-3" />
+                  <button onClick={() => toggleSort("full_name")} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider hover:text-white" style={{ color: "hsl(var(--text-muted))" }}>
+                    Contact {sortKey === "full_name" && <ArrowUpDown className="w-3 h-3" />}
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left hidden md:table-cell">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Company</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Phone & Email</span>
                 </th>
                 <th className="px-4 py-3 text-center">
-                  <button onClick={() => toggleSort("lead_score")} className="flex items-center gap-1 text-xs font-semibold uppercase tracking-wider mx-auto" style={{ color: "hsl(var(--text-muted))" }}>
-                    Score <ArrowUpDown className="w-3 h-3" />
+                  <button onClick={() => toggleSort("lead_score")} className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider hover:text-white mx-auto" style={{ color: "hsl(var(--text-muted))" }}>
+                    Score {sortKey === "lead_score" && <ArrowUpDown className="w-3 h-3" />}
                   </button>
                 </th>
                 <th className="px-4 py-3 text-left hidden lg:table-cell">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Source</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Source</span>
                 </th>
-                <th className="px-4 py-3 text-center">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Actions</span>
+                <th className="px-4 py-3 text-center w-24">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "hsl(var(--text-muted))" }}>Actions</span>
                 </th>
               </tr>
             </thead>
@@ -376,7 +384,7 @@ export default function ContactsPage() {
                       <span className="text-[13px]" style={{ color: "hsl(var(--text-secondary))" }}>{contact.company_name}</span>
                     </div>
                   </td>
-                  <td className="px-4 py-3 text-center">
+                  <td className="px-4 py-3 text-center" title={contact.custom_fields?.lead_score_reason || "No qualification detail available."}>
                     <LeadScoreBadge score={contact.lead_score} />
                   </td>
                   <td className="px-4 py-3 hidden lg:table-cell">

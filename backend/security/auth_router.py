@@ -105,6 +105,9 @@ async def signup_user(payload: SignupPayload):
             raise HTTPException(status_code=400, detail=f"Signup failed: {str(e)}")
 
     # ── Dev Fallback (Supabase offline or app_env=development) ─────────────────────────
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication service is currently offline.")
+
     users = _load_local_users()
     if any(u["email"] == payload.email for u in users):
         raise HTTPException(status_code=400, detail="User with this email already exists.")
@@ -183,6 +186,8 @@ async def login_user(payload: AuthPayload):
             raise HTTPException(status_code=401, detail="Invalid email or password.")
 
     # ── Dev Fallback (Supabase offline or app_env=development) ─────────────────────────
+    if settings.app_env not in ("development", "test"):
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Authentication service is currently offline.")
     # Admin fallback user always allowed
     if payload.email == "admin@visoora.com" and payload.password == "Visoora@2024":
         token = generate_mock_token("local_admin_id", payload.email, "admin", "acme_tenant")

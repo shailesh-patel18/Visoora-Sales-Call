@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   Users,
@@ -21,24 +22,48 @@ import {
   Radio,
   LogOut,
   Mail,
+  Sparkles,
+  Activity,
+  BrainCircuit,
 } from "lucide-react";
 import { useCRMStore } from "../store";
 import { useAuthStore } from "../auth/store";
 import { useRouter } from "next/navigation";
+import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/agents", label: "AI Employees", icon: Bot },
-  { href: "/playbooks", label: "Playbooks", icon: BookOpen },
-  { href: "/knowledge", label: "Knowledge Base", icon: FolderOpen },
-  { href: "/objections", label: "Objection Center", icon: ShieldAlert },
-  { href: "/campaigns", label: "Campaigns", icon: Target },
-  { href: "/contacts", label: "Contacts", icon: Users },
-  { href: "/pipeline", label: "Pipeline", icon: Kanban },
-  { href: "/calls", label: "Calls", icon: Phone },
-  { href: "/settings/compliance", label: "Compliance", icon: Shield },
-  { href: "/settings/email", label: "Email Accounts", icon: Mail },
-  { href: "/settings/billing", label: "Billing", icon: CreditCard },
+const navGroups = [
+  {
+    title: "AI Workspace",
+    items: [
+      { href: "/dashboard", label: "Command Center", icon: Activity },
+      { href: "/inbox", label: "Approvals Inbox", icon: ShieldAlert, badgeKey: "inbox" },
+      { href: "/business-map", label: "Business Brain", icon: BrainCircuit },
+      { href: "/agents", label: "AI Employees", icon: Bot },
+    ]
+  },
+  {
+    title: "Sales Execution",
+    items: [
+      { href: "/campaigns", label: "Missions", icon: Target },
+      { href: "/contacts", label: "Leads", icon: Users },
+      { href: "/pipeline", label: "Pipeline", icon: Kanban },
+    ]
+  },
+  {
+    title: "Knowledge",
+    items: [
+      { href: "/playbooks", label: "Playbooks", icon: BookOpen },
+      { href: "/objections", label: "Objection Matrix", icon: FolderOpen },
+    ]
+  },
+  {
+    title: "Settings",
+    items: [
+      { href: "/settings/email", label: "Integrations", icon: Mail },
+      { href: "/settings/billing", label: "Billing", icon: CreditCard },
+    ]
+  }
 ];
 
 export function Sidebar() {
@@ -46,9 +71,25 @@ export function Sidebar() {
   const { sidebarCollapsed, toggleSidebar, mobileSidebarOpen, setMobileSidebarOpen } = useCRMStore();
   const { user, logout } = useAuthStore();
   const router = useRouter();
+  const [mounted, setMounted] = React.useState(false);
+  const [inboxCount, setInboxCount] = React.useState(0);
+
+  // Poll inbox badge count every 45 seconds
+  React.useEffect(() => {
+    const fetchCount = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/analytics/inbox/count`, { headers: getAuthHeaders() });
+        if (res.ok) { const d = await res.json(); setInboxCount(d.count ?? 0); }
+      } catch { /* silent */ }
+    };
+    fetchCount();
+    const interval = setInterval(fetchCount, 45000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Automatically close mobile sidebar drawer upon page routing navigation
   React.useEffect(() => {
+    setMounted(true);
     setMobileSidebarOpen(false);
   }, [pathname, setMobileSidebarOpen]);
 
@@ -82,44 +123,87 @@ export function Sidebar() {
             background: "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))",
           }}
         >
-          <Zap className="w-4 h-4 text-white" />
+          <Zap className="w-4 h-4 text-black" />
         </div>
         {!sidebarCollapsed && (
           <span className="font-bold text-[15px] tracking-tight" style={{ color: "hsl(var(--text-primary))" }}>
-            Visoora
+            Visoora AI
           </span>
         )}
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 flex flex-col gap-1 px-3 py-4">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href || pathname?.startsWith(item.href + "/");
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                isActive
-                  ? "text-white"
-                  : ""
-              }`}
-              style={{
-                color: isActive ? "hsl(var(--text-primary))" : "hsl(var(--text-secondary))",
-                background: isActive ? "hsl(var(--surface-3))" : "transparent",
-              }}
-              title={sidebarCollapsed ? item.label : undefined}
-            >
-              <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
-              {!sidebarCollapsed && <span>{item.label}</span>}
-            </Link>
-          );
-        })}
-      </nav>
+      {/* Navigation Groups */}
+      <div className="flex-1 overflow-y-auto py-4 px-2 space-y-6 custom-scrollbar">
+        {navGroups.map((group, groupIndex) => (
+          <div key={groupIndex} className="space-y-1">
+            {!sidebarCollapsed && (
+              <h4 className="px-3 text-[10px] font-bold uppercase tracking-wider text-gray-500 mb-2">
+                {group.title}
+              </h4>
+            )}
+            
+            {group.items.map((item) => {
+              const isActive = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
+              const Icon = item.icon;
+              
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`
+                    flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 group relative
+                    ${
+                      isActive
+                        ? "bg-white/10 text-white shadow-sm"
+                        : "text-[hsl(var(--text-secondary))] hover:bg-white/5 hover:text-white"
+                    }
+                  `}
+                  title={sidebarCollapsed ? item.label : undefined}
+                >
+                  <Icon
+                    className={`w-4.5 h-4.5 flex-shrink-0 transition-colors ${
+                      isActive ? "text-[#00F0FF]" : "text-gray-400 group-hover:text-gray-300"
+                    }`}
+                  />
+                  {!sidebarCollapsed && (
+                    <div className="flex flex-1 items-center justify-between">
+                      <span className="text-[13px] font-medium leading-tight">
+                        {item.label}
+                      </span>
+                      {(item as any).badgeKey === "inbox" && inboxCount > 0 && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#00F0FF]/10 text-[#00F0FF] border border-[#00F0FF]/20">
+                          {inboxCount}
+                        </span>
+                      )}
+                      {!(item as any).badgeKey && (item as any).badge && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-[#00F0FF]/10 text-[#00F0FF] border border-[#00F0FF]/20">
+                          {(item as any).badge}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {/* Active Indicator Strip */}
+                  {isActive && (
+                    <motion.div
+                      layoutId="activeNavIndicator"
+                      className="absolute left-0 top-1 bottom-1 w-0.5 rounded-r-full bg-[#00F0FF]"
+                      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    />
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
+      </div>
 
       {/* User profile & Logout */}
       <div className="p-3 border-t mt-auto" style={{ borderColor: "hsl(var(--border-subtle))" }}>
-        {sidebarCollapsed ? (
+        {!mounted ? (
+          <div className="flex items-center justify-center py-2 h-10">
+            <div className="w-8 h-8 rounded-full bg-white/10 animate-pulse" />
+          </div>
+        ) : sidebarCollapsed ? (
           <div className="flex flex-col items-center gap-3 py-2">
             <div 
               className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white uppercase shadow-inner"

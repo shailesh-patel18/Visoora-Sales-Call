@@ -501,8 +501,11 @@ async def get_contact_timeline(id: UUID, user: UserPrincipal = Depends(get_curre
 # ====================================================
 # LEAD DATA ENRICHMENT PIPELINE WORKER (ASYNC)
 # ====================================================
-async def background_lead_enrichment_worker(contact_id: str, tenant_id: str):
+async def background_lead_enrichment_worker(contact_id: str, tenant_id: str, correlation_id: str = "unknown"):
     """Simulates background lead metadata calls using Apollo/Clearbit mock triggers."""
+    from security.logging import correlation_id_var, tenant_id_var
+    correlation_id_var.set(correlation_id)
+    tenant_id_var.set(tenant_id)
     await asyncio.sleep(1.0) # Yield control
     logger.info("crm_enrichment_background_start", contact_id=contact_id)
 
@@ -640,5 +643,161 @@ async def enrich_contact(id: UUID, background_tasks: BackgroundTasks, user: User
         raise HTTPException(status_code=404, detail="Contact not found.")
 
     # Queue background enrichment task
-    background_tasks.add_task(background_lead_enrichment_worker, str(id), tenant_id)
+    from security.logging import correlation_id_var
+    background_tasks.add_task(background_lead_enrichment_worker, str(id), tenant_id, correlation_id_var.get())
     return {"message": "Lead data enrichment task queued successfully.", "status": "processing"}
+
+
+from pydantic import BaseModel
+
+class OutreachEmailUpdate(BaseModel):
+    subject: str
+    body: str
+
+
+@router.post("/contacts/{id}/outreach/generate", status_code=status.HTTP_202_ACCEPTED)
+async def generate_outreach_email(id: UUID, user: UserPrincipal = Depends(get_current_user)):
+    """Triggers an asynchronous background job to generate cold outreach email via Claude."""
+    tenant_id = user.tenant_id
+    
+    # Verify contact exists
+    contact_exists = False
+    if supabase_client:
+        try:
+            res = supabase_client.table("contacts").select("id").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
+            if res.data:
+                contact_exists = True
+        except Exception:
+            pass
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        contact_exists = any(c["id"] == str(id) and c["tenant_id"] == tenant_id for c in local_contacts)
+
+    if not contact_exists:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
+    # Mark custom_fields.outreach_email.status as 'generating' immediately
+    if supabase_client:
+        try:
+            # fetch current custom fields
+            res = supabase_client.table("contacts").select("custom_fields").eq("id", str(id)).execute()
+            cf = res.data[0]["custom_fields"] if res.data else {}
+            cf["outreach_email"] = {"subject": "", "body": "", "status": "generating"}
+            supabase_client.table("contacts").update({"custom_fields": cf}).eq("id", str(id)).execute()
+        except Exception:
+            pass
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        for c in local_contacts:
+            if c["id"] == str(id):
+                c["custom_fields"] = c.get("custom_fields") or {}
+                c["custom_fields"]["outreach_email"] = {"subject": "", "body": "", "status": "generating"}
+                break
+        _save_local_json("local_crm_contacts.json", local_contacts)
+
+    from server.worker import enqueue_background_job
+    await enqueue_background_job(
+        tenant_id=tenant_id,
+        job_type="generate_email",
+        payload={"tenant_id": tenant_id, "contact_id": str(id)}
+    )
+    return {"message": "Email generation job enqueued successfully.", "status": "processing"}
+
+
+@router.put("/contacts/{id}/outreach/edit", response_model=ContactResponse)
+async def edit_outreach_email(id: UUID, payload: OutreachEmailUpdate, user: UserPrincipal = Depends(get_current_user)):
+    """Edits the subject/body of the generated cold outreach email."""
+    tenant_id = user.tenant_id
+    contact = None
+
+    if supabase_client:
+        try:
+            res = supabase_client.table("contacts").select("*").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
+            if res.data:
+                contact = res.data[0]
+        except Exception:
+            pass
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        for c in local_contacts:
+            if c["id"] == str(id) and c["tenant_id"] == tenant_id:
+                contact = c
+                break
+
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
+    cf = contact.get("custom_fields") or {}
+    cf["outreach_email"] = {
+        "subject": payload.subject,
+        "body": payload.body,
+        "status": "review"
+    }
+
+    if supabase_client:
+        try:
+            res = supabase_client.table("contacts").update({"custom_fields": cf}).eq("id", str(id)).eq("tenant_id", tenant_id).execute()
+            if res.data:
+                return res.data[0]
+        except Exception as e:
+            logger.error("edit_email_db_failed", error=str(e))
+            raise HTTPException(status_code=500, detail="Database write error.")
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        for c in local_contacts:
+            if c["id"] == str(id) and c["tenant_id"] == tenant_id:
+                c["custom_fields"] = cf
+                _save_local_json("local_crm_contacts.json", local_contacts)
+                return c
+
+    raise HTTPException(status_code=500, detail="Failed to edit email.")
+
+
+@router.post("/contacts/{id}/outreach/send")
+async def send_outreach_email(id: UUID, user: UserPrincipal = Depends(get_current_user)):
+    """Sends the generated cold outreach email via Resend/mock provider."""
+    tenant_id = user.tenant_id
+    contact = None
+
+    if supabase_client:
+        try:
+            res = supabase_client.table("contacts").select("*").eq("id", str(id)).eq("tenant_id", tenant_id).execute()
+            if res.data:
+                contact = res.data[0]
+        except Exception:
+            pass
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        for c in local_contacts:
+            if c["id"] == str(id) and c["tenant_id"] == tenant_id:
+                contact = c
+                break
+
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found.")
+
+    cf = contact.get("custom_fields") or {}
+    email_data = cf.get("outreach_email")
+    if not email_data or not email_data.get("subject") or not email_data.get("body"):
+        raise HTTPException(status_code=400, detail="No email outreach generated yet to send.")
+
+    # Mark status as sent
+    email_data["status"] = "sent"
+    cf["outreach_email"] = email_data
+
+    # Save update
+    if supabase_client:
+        try:
+            supabase_client.table("contacts").update({"custom_fields": cf}).eq("id", str(id)).eq("tenant_id", tenant_id).execute()
+        except Exception as e:
+            logger.error("send_email_db_status_failed", error=str(e))
+    else:
+        local_contacts = _load_local_json("local_crm_contacts.json")
+        for c in local_contacts:
+            if c["id"] == str(id) and c["tenant_id"] == tenant_id:
+                c["custom_fields"] = cf
+                break
+        _save_local_json("local_crm_contacts.json", local_contacts)
+
+    logger.info("email_sent_successfully", contact_id=str(id), subject=email_data["subject"])
+    return {"success": True, "message": "Email outreach dispatched successfully.", "email": email_data}

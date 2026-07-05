@@ -46,6 +46,15 @@ from observability.metrics import (
 # Configure structlog globally
 configure_structlog()
 
+import sentry_sdk
+
+if settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.app_env,
+        traces_sample_rate=1.0,
+    )
+
 
 # ----------------------------------------------------
 # PRODUCTION STRUCTURED LOGGER DEFINITION (structlog)
@@ -326,9 +335,9 @@ os.makedirs("recordings", exist_ok=True)
 if not os.path.exists(CAMPAIGN_LEADS_FILE):
     with open(CAMPAIGN_LEADS_FILE, "w") as f:
         json.dump([
-            {"id": "lead_1", "name": "John Doe", "company": "Acme Corp", "phone": "+15017122661", "status": "Pending", "retry_count": 0},
-            {"id": "lead_2", "name": "Sarah Connor", "company": "Cyberdyne Systems", "phone": "+919824457565", "status": "Pending", "retry_count": 0},
-            {"id": "lead_3", "name": "Bruce Wayne", "company": "Wayne Enterprises", "phone": "+442079460192", "status": "Pending", "retry_count": 0}
+            {"id": "lead_1", "tenant_id": "acme_tenant", "name": "John Doe", "company": "Acme Corp", "phone": "+15017122661", "status": "Pending", "retry_count": 0},
+            {"id": "lead_2", "tenant_id": "acme_tenant", "name": "Sarah Connor", "company": "Cyberdyne Systems", "phone": "+919824457565", "status": "Pending", "retry_count": 0},
+            {"id": "lead_3", "tenant_id": "acme_tenant", "name": "Bruce Wayne", "company": "Wayne Enterprises", "phone": "+442079460192", "status": "Pending", "retry_count": 0}
         ], f, indent=2)
 
 # ----------------------------------------------------
@@ -381,11 +390,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi.staticfiles import StaticFiles
+app.mount("/recordings", StaticFiles(directory="recordings"), name="recordings")
+
 # ----------------------------------------------------
 # ROUTER REGISTRATION
 # ----------------------------------------------------
 from server.analytics_api import analytics_router
+from server.public_api import public_router
+from server.services.business_activation import activation_router
+from server.mission_api import mission_router
+
 app.include_router(analytics_router, prefix="/api")
+app.include_router(public_router)
+app.include_router(activation_router)
+app.include_router(mission_router)
 
 # Initialize OpenTelemetry tracer on app creation
 init_tracer(
@@ -403,8 +422,8 @@ SERVICE_INFO.info({
 # Instrument FastAPI with OpenTelemetry (auto-instruments HTTP spans)
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    FastAPIInstrumentor.instrument_app(app)
-    log_info("otel_fastapi_instrumented", "FastAPI auto-instrumented with OpenTelemetry.")
+    # FastAPIInstrumentor.instrument_app(app) # Temporarily disabled due to CORS/OPTIONS bug with _IncludedRouter
+    log_info("otel_fastapi_instrumented", "FastAPI auto-instrumentation temporarily disabled.")
 except ImportError:
     log_warn("otel_fastapi_skip", "opentelemetry-instrumentation-fastapi not installed — skipping auto-instrumentation.")
 
@@ -465,6 +484,9 @@ async def startup_event():
     check_dev_env_production_safety()
     run_boot_time_validation()
     await rate_limiter.connect()
+    # Start background job worker
+    from server.worker import start_background_worker
+    await start_background_worker()
     # Register SIGTERM and SIGINT graceful shutdown signal handlers
     try:
         loop = asyncio.get_running_loop()
@@ -499,13 +521,20 @@ app.include_router(sms_router)
 from server.onboarding_api import onboarding_router
 app.include_router(onboarding_router)
 
+# Include background jobs router
+from server.job_router import router as job_router
+app.include_router(job_router)
+
 # Include SaaS Stripe billing and usage metering router
 from billing.router import billing_router
 app.include_router(billing_router)
 
 # Include Phase A AI Sales Employee router
-from sales_employee.router import sales_employee_router
+from sales_employee.router import sales_employee_router, public_sales_router
+from server.ws_mission_router import ws_mission_router
 app.include_router(sales_employee_router)
+app.include_router(public_sales_router)
+app.include_router(ws_mission_router)
 
 # Include authentication proxy router
 from security.auth_router import auth_router
@@ -606,10 +635,26 @@ async def handle_incoming_call(request: Request, verified: bool = Depends(verify
     company = request.query_params.get("company", "Global Corp")
     tenant_id = request.query_params.get("tenant_id", "default_shared_tenant")
     call_id = request.query_params.get("call_id", "")
+    task_id = request.query_params.get("task_id", "")
     
     # Fetch pre-call long-term memory brief context
     from memory.manager import memory_manager
     context_brief = await memory_manager.load_pre_call_context(prospect_phone, tenant_id)
+    
+    # Phase 4: Check if a conversation plan exists in Supabase
+    conversation_plan_json = "{}"
+    if task_id:
+        from server.storage_manager import supabase_client
+        if supabase_client:
+            try:
+                from server.onboarding_api import resolve_tenant_uuid
+                tenant_uuid = resolve_tenant_uuid(tenant_id)
+                res = supabase_client.table("call_contexts").select("conversation_plan").eq("task_id", task_id).eq("tenant_id", tenant_uuid).execute()
+                if res.data:
+                    import json
+                    conversation_plan_json = json.dumps(res.data[0].get("conversation_plan", {}))
+            except Exception:
+                pass
     
     base_url = _public_base_url_from_request(request)
     ws_url = _websocket_url_from_base(base_url, "/media-stream", {
@@ -618,7 +663,9 @@ async def handle_incoming_call(request: Request, verified: bool = Depends(verify
         "company": company,
         "tenant_id": tenant_id,
         "call_id": call_id,
+        "task_id": task_id,
         "brief": context_brief or "",
+        "conversation_plan": conversation_plan_json
     })
     
     log_info("incoming_call_webhook_hit", f"Incoming call bridged. Routing to media stream: {ws_url}", 
@@ -660,12 +707,40 @@ async def handle_twilio_status_callback(request: Request, verified: bool = Depen
     Protected by X-Twilio-Signature verification middleware.
     """
     try:
+        task_id = request.query_params.get("task_id")
+        mission_id = request.query_params.get("mission_id")
         form_data = await request.form()
         call_sid = form_data.get("CallSid")
         call_status = form_data.get("CallStatus")
         duration = form_data.get("CallDuration") or "0"
         
-        log_info("twilio_status_callback", f"Twilio Status Update: {call_status}", call_sid=call_sid, call_status=call_status, call_duration=duration)
+        log_info("twilio_status_callback", f"Twilio Status Update: {call_status}", call_sid=call_sid, call_status=call_status, call_duration=duration, task_id=task_id)
+        
+        # Phase 4: Telemetry & Post-Call Analysis
+        if task_id and mission_id:
+            from server.services.mission_engine import emit_mission_event
+            emit_mission_event(mission_id, f"call_{call_status}", task_id, {"call_sid": call_sid, "duration": duration})
+            
+            if call_status in ["completed", "failed", "busy", "no-answer", "canceled"]:
+                from server.storage_manager import supabase_client
+                if supabase_client:
+                    # Update Voice Task Status
+                    task_status = "success" if call_status == "completed" else "failed"
+                    # Since webhook doesn't pass tenant_id, we just update the specific task_id 
+                    # generated securely by the backend (UUIDv4)
+                    supabase_client.table("mission_tasks").update({"status": task_status}).eq("id", task_id).execute()
+                    
+                    # Spawn Post Call Analysis Task (Sprint 2)
+                    if call_status == "completed":
+                        from server.services.mission_engine import add_mission_task
+                        add_mission_task(
+                            mission_id=mission_id,
+                            agent_type="post_call_analysis_agent",
+                            dependencies=[task_id],
+                            payload={"call_sid": call_sid, "duration": duration}
+                        )
+                        log_info("post_call_analysis_spawned", "Spawned PostCallAnalysisAgent task", call_sid=call_sid, mission_id=mission_id)
+                        
         return Response(status_code=200)
     except Exception as e:
         log_error("twilio_status_callback_error", f"Error in status callback route: {e}")
@@ -769,14 +844,22 @@ async def handle_media_stream(websocket: WebSocket):
     # Last RTT tracking for variance/jitter calculations
     last_rtt_ms = 0.0
     
-    # Initialize StateMachineController with pre-call brief
+    # Initialize StateMachineController with pre-call brief and Phase 4 conversation plan
     context_brief = params.get("brief", "")
+    conversation_plan_json = params.get("conversation_plan", "{}")
+    import json
+    try:
+        conversation_plan = json.loads(conversation_plan_json)
+    except Exception:
+        conversation_plan = {}
+        
     try:
         fsm = StateMachineController(initial_metadata={
             "name": prospect_name,
             "company": company_name,
             "phone": phone_number,
-            "context_brief": context_brief
+            "context_brief": context_brief,
+            "conversation_plan": conversation_plan
         }, tenant_id=tenant_id)
         log_info("fsm_initialized", f"Conversational FSM controller initialized with brief: {context_brief}", 
                  stream_sid=stream_sid, initial_state=fsm.context.current_state, trace_id=trace_id)
@@ -1233,189 +1316,136 @@ async def handle_media_stream(websocket: WebSocket):
                         ))
 
                         # 3. Define Real LLM calls with circuit breakers
-                        async def real_google_call():
+                        async def real_claude_call():
                             """
-                            Gemini streaming fast-path (Rec 6 — executive audit).
-
-                            Uses streamGenerateContent (SSE) instead of generateContent to
-                            achieve first-token-fast-path TTS dispatch:
-
-                              1. Open an SSE stream to Gemini 2.0 Flash.
-                              2. Accumulate token chunks until a sentence boundary (.!?).
-                              3. On the FIRST sentence boundary: immediately fire send_agent_speech()
-                                 so TTS synthesis starts while the LLM is still generating.
-                              4. Buffer the remaining tokens; join and return the full string
-                                 for safety validation downstream.
-
-                            This cuts end-to-end latency (ASR → TTS playback) by ~40–60%
-                            compared to waiting for the full generateContent response.
+                            Standardized primary Claude call with Messages API,
+                            SSE streaming, and exponential backoff retry.
                             """
-                            google_key = os.getenv("GOOGLE_API_KEY")
-                            if not google_key or "AIzaSy" not in google_key:
-                                raise RuntimeError("Google API key missing or invalid.")
-                            if inject_fault == "llm_failure":
-                                raise RuntimeError("Simulated primary Google LLM connection error.")
+                            anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+                            if not anthropic_key or "sk-ant" not in anthropic_key:
+                                raise RuntimeError("Anthropic API key missing or invalid.")
+                            if inject_fault == "llm_failure" or inject_fault == "llm_failure_all":
+                                raise RuntimeError("Simulated primary Claude LLM connection error.")
 
                             system_instruction = fsm.compile_expert_system_prompt()
 
                             async with transcripts_lock:
                                 turns = list(call_transcripts_buffers.get(stream_sid or active_sid, []))
 
-                            gemini_messages = []
+                            claude_messages = []
                             for turn in turns:
-                                role = "user" if turn["speaker"] in ["prospect"] else "model"
-                                gemini_messages.append({
+                                role = "user" if turn["speaker"] in ["prospect"] else "assistant"
+                                claude_messages.append({
                                     "role": role,
-                                    "parts": [{"text": turn["text"]}]
+                                    "content": turn["text"]
                                 })
 
                             body = {
-                                "systemInstruction": {
-                                    "parts": [{"text": system_instruction}]
-                                },
-                                "contents": gemini_messages,
-                                "generationConfig": {
-                                    "maxOutputTokens": 120,
-                                    "temperature": 0.7
-                                }
-                            }
-                            # streamGenerateContent with alt=sse returns newline-delimited JSON chunks
-                            # Each chunk contains a partial candidate text token.
-                            url = (
-                                f"https://generativelanguage.googleapis.com/v1/models/"
-                                f"gemini-2.0-flash:streamGenerateContent"
-                                f"?alt=sse&key={google_key}"
-                            )
-
-                            # ── Streaming token accumulator ──────────────────────────────
-                            token_buffer = ""          # Accumulates current in-progress sentence
-                            sentence_chunks: list = [] # Completed sentence strings
-                            first_sentence_sent = False
-
-                            async with httpx.AsyncClient() as client:
-                                async with client.stream("POST", url, json=body, timeout=8.0) as resp:
-                                    if resp.status_code != 200:
-                                        body_text = await resp.aread()
-                                        raise RuntimeError(
-                                            f"Gemini streaming API returned error: {resp.status_code} - {body_text.decode()[:200]}"
-                                        )
-
-                                    async for raw_line in resp.aiter_lines():
-                                        line = raw_line.strip()
-                                        if not line or not line.startswith("data:"):
-                                            continue
-
-                                        data_str = line[len("data:"):].strip()
-                                        if data_str == "[DONE]":
-                                            break
-
-                                        try:
-                                            chunk_json = json.loads(data_str)
-                                            token_text = (
-                                                chunk_json
-                                                .get("candidates", [{}])[0]
-                                                .get("content", {})
-                                                .get("parts", [{}])[0]
-                                                .get("text", "")
-                                            )
-                                        except (json.JSONDecodeError, IndexError, KeyError):
-                                            continue
-
-                                        if not token_text:
-                                            continue
-
-                                        token_buffer += token_text
-
-                                        # Check for sentence boundary in the accumulated buffer
-                                        # Split conservatively — only on unambiguous end-of-sentence markers
-                                        if not first_sentence_sent:
-                                            # Look for sentence boundary in buffer
-                                            boundary = -1
-                                            for end_char in (".", "!", "?"):
-                                                idx = token_buffer.rfind(end_char)
-                                                if idx != -1 and idx > boundary:
-                                                    boundary = idx
-
-                                            if boundary != -1:
-                                                # We have at least one complete sentence
-                                                first_sentence = token_buffer[: boundary + 1].strip()
-                                                remainder = token_buffer[boundary + 1 :].strip()
-
-                                                if first_sentence:
-                                                    # ── FAST PATH: dispatch first sentence to TTS NOW ──
-                                                    log_info(
-                                                        "llm_stream_first_sentence_dispatch",
-                                                        f"Streaming first-sentence fast-path: '{first_sentence[:60]}…'",
-                                                        stream_sid=stream_sid,
-                                                        trace_id=trace_id,
-                                                    )
-                                                    sentence_chunks.append(first_sentence)
-                                                    await send_agent_speech(first_sentence)
-                                                    first_sentence_sent = True
-                                                    token_buffer = remainder  # Continue buffering remainder
-
-                                    # ── Stream complete: flush any remaining buffer ───────────────────
-                                    if token_buffer.strip():
-                                        sentence_chunks.append(token_buffer.strip())
-                                    # If we never found a first sentence boundary in the stream
-                                    # (very short responses), send the whole thing now.
-                                    if not first_sentence_sent and sentence_chunks:
-                                        await send_agent_speech(" ".join(sentence_chunks))
-                                    elif not first_sentence_sent and token_buffer.strip():
-                                        await send_agent_speech(token_buffer.strip())
-
-                            # Return the full response for downstream safety validation.
-                            # Sentence chunks are already dispatched to TTS; the guard will
-                            # validate the text but NOT call send_agent_speech again.
-                            full_response = " ".join(sentence_chunks).strip()
-                            if not full_response:
-                                raise RuntimeError("Gemini streaming response returned empty text.")
-                            return full_response
-
-                        async def real_gpt4o_call():
-                            openai_key = os.getenv("OPENAI_API_KEY")
-                            if not openai_key or "sk-proj" not in openai_key:
-                                raise RuntimeError("OpenAI API key missing or invalid.")
-                            if inject_fault == "llm_failure_all":
-                                raise RuntimeError("Simulated GPT-4o LLM connection error.")
-
-                            system_instruction = fsm.compile_expert_system_prompt()
-                            
-                            async with transcripts_lock:
-                                turns = list(call_transcripts_buffers.get(stream_sid or active_sid, []))
-                            
-                            messages = [{"role": "system", "content": system_instruction}]
-                            for turn in turns:
-                                role = "assistant" if turn["speaker"] in ["agent", "agent_filler"] else "user"
-                                messages.append({"role": role, "content": turn["text"]})
-                            
-                            body = {
-                                "model": "gpt-4o",
-                                "messages": messages,
+                                "model": "claude-3-5-sonnet-20241022",
+                                "messages": claude_messages,
+                                "system": system_instruction,
                                 "max_tokens": 120,
-                                "temperature": 0.7
+                                "temperature": 0.7,
+                                "stream": True
                             }
-                            url = "https://api.openai.com/v1/chat/completions"
+                            url = "https://api.anthropic.com/v1/messages"
                             headers = {
-                                "Authorization": f"Bearer {openai_key}",
-                                "Content-Type": "application/json"
+                                "x-api-key": anthropic_key,
+                                "anthropic-version": "2023-06-01",
+                                "content-type": "application/json"
                             }
-                            
-                            async with httpx.AsyncClient() as client:
-                                res = await client.post(url, json=body, headers=headers, timeout=4.0)
-                                if res.status_code != 200:
-                                    raise RuntimeError(f"OpenAI API returned error: {res.status_code} - {res.text}")
-                                res_json = res.json()
-                                text = res_json["choices"][0]["message"]["content"]
-                                return text.strip()
+
+                            attempts = 3
+                            backoff_delay = 1.0
+
+                            for attempt in range(attempts):
+                                try:
+                                    token_buffer = ""
+                                    sentence_chunks = []
+                                    first_sentence_sent = False
+
+                                    async with httpx.AsyncClient() as client:
+                                        async with client.stream("POST", url, json=body, headers=headers, timeout=8.0) as resp:
+                                            if resp.status_code != 200:
+                                                body_text = await resp.aread()
+                                                raise RuntimeError(
+                                                    f"Claude streaming API returned error: {resp.status_code} - {body_text.decode()[:200]}"
+                                                )
+
+                                            async for raw_line in resp.aiter_lines():
+                                                line = raw_line.strip()
+                                                if not line or not line.startswith("data:"):
+                                                    continue
+
+                                                data_str = line[len("data:"):].strip()
+                                                try:
+                                                    chunk_json = json.loads(data_str)
+                                                    if chunk_json.get("type") == "content_block_delta":
+                                                        token_text = chunk_json.get("delta", {}).get("text", "")
+                                                    else:
+                                                        continue
+                                                except Exception:
+                                                    continue
+
+                                                if not token_text:
+                                                    continue
+
+                                                token_buffer += token_text
+
+                                                # Check for sentence boundary in the accumulated buffer
+                                                if not first_sentence_sent:
+                                                    boundary = -1
+                                                    for end_char in (".", "!", "?"):
+                                                        idx = token_buffer.rfind(end_char)
+                                                        if idx != -1 and idx > boundary:
+                                                            boundary = idx
+
+                                                    if boundary != -1:
+                                                        # We have at least one complete sentence
+                                                        first_sentence = token_buffer[: boundary + 1].strip()
+                                                        remainder = token_buffer[boundary + 1 :].strip()
+
+                                                        if first_sentence:
+                                                            # ── FAST PATH: dispatch first sentence to TTS NOW ──
+                                                            log_info(
+                                                                "llm_stream_first_sentence_dispatch",
+                                                                f"Streaming first-sentence fast-path: '{first_sentence[:60]}…'",
+                                                                stream_sid=stream_sid,
+                                                                trace_id=trace_id,
+                                                            )
+                                                            sentence_chunks.append(first_sentence)
+                                                            await send_agent_speech(first_sentence)
+                                                            first_sentence_sent = True
+                                                            token_buffer = remainder  # Continue buffering remainder
+
+                                            # ── Stream complete: flush any remaining buffer ───────────────────
+                                            if token_buffer.strip():
+                                                sentence_chunks.append(token_buffer.strip())
+                                            # If we never found a first sentence boundary in the stream
+                                            # (very short responses), send the whole thing now.
+                                            if not first_sentence_sent and sentence_chunks:
+                                                await send_agent_speech(" ".join(sentence_chunks))
+                                            elif not first_sentence_sent and token_buffer.strip():
+                                                await send_agent_speech(token_buffer.strip())
+
+                                    full_response = " ".join(sentence_chunks).strip()
+                                    if not full_response:
+                                        raise RuntimeError("Claude streaming response returned empty text.")
+                                    return full_response
+
+                                except Exception as e:
+                                    if attempt == attempts - 1:
+                                        raise e
+                                    log_warn("claude_api_attempt_failed", attempt=attempt+1, error=str(e))
+                                    await asyncio.sleep(backoff_delay)
+                                    backoff_delay *= 2
 
                         async def mock_fallback_call():
                             log_info("llm_fallback_mock_triggered", "Real LLM calls failed or timed out. Falling back to local mock script.")
                             return mock_response_text
 
                         provider_calls = {
-                            "google": real_google_call,
-                            "gpt4o": real_gpt4o_call,
+                            "claude": real_claude_call,
                             "emergency": mock_fallback_call
                         }
 
@@ -1425,22 +1455,18 @@ async def handle_media_stream(websocket: WebSocket):
                             await record_and_broadcast_turn(active_sid, "agent_filler", phrase, current)
 
                         # Streaming fast-path guard flag.
-                        # When real_google_call() uses the SSE streaming path it dispatches
-                        # the first sentence (and any remainder) to send_agent_speech() directly
-                        # to minimise latency. In that case we must NOT dispatch again below —
-                        # UNLESS the safety guard substituted a different response (SAFE_RECOVERY_POOL).
                         _streaming_dispatched = False
                         _streamed_llm_text: list = []  # captured via wrapper closure
 
-                        _orig_real_google_call = real_google_call
-                        async def real_google_call_wrapper():
+                        _orig_real_claude_call = real_claude_call
+                        async def real_claude_call_wrapper():
                             nonlocal _streaming_dispatched
-                            result = await _orig_real_google_call()
+                            result = await _orig_real_claude_call()
                             _streaming_dispatched = True  # streaming path dispatched internally
                             _streamed_llm_text.append(result)  # capture for comparison below
                             return result
 
-                        provider_calls["google"] = real_google_call_wrapper
+                        provider_calls["claude"] = real_claude_call_wrapper
 
                         # 4. Apply safety/circuit breaker logic
                         from pipeline.llm_guard import LLMGuardSystem
@@ -1460,7 +1486,7 @@ async def handle_media_stream(websocket: WebSocket):
                         current_turn["ai_generation_end_timestamp"] = time.time()
 
                         if _streaming_dispatched:
-                            # The Google streaming fast-path already sent the raw LLM text to TTS.
+                            # The Claude streaming fast-path already sent the raw LLM text to TTS.
                             # Only re-dispatch if the safety guard *substituted* a different response
                             # (e.g. a SAFE_RECOVERY_POOL phrase). We detect substitution by comparing
                             # the raw streamed text against what the guard ultimately returned.
@@ -1475,7 +1501,7 @@ async def handle_media_stream(websocket: WebSocket):
                                 await send_agent_speech(safe_response)
                             # else: streaming already dispatched correctly — skip to avoid double TTS
                         else:
-                            # Standard path (non-Google provider or guard short-circuit) — dispatch now
+                            # Standard path (non-Claude provider or guard short-circuit) — dispatch now
                             await send_agent_speech(safe_response)
 
                         # CRITICAL: Terminate streaming if FSM reached a terminal state
@@ -1986,7 +2012,8 @@ async def health_live():
 async def health_ready():
     """
     Readiness check probe.
-    Returns 200 OK only if Redis is connected, Twilio is reachable, and active calls < 50.
+    Returns 200 OK only if Redis is connected, Anthropic API is configured,
+    Twilio is reachable, and active calls < 50.
     """
     if is_shutting_down:
         return JSONResponse(status_code=503, content={"status": "unready", "reason": "shutting_down"})
@@ -2002,6 +2029,10 @@ async def health_ready():
         except Exception as e:
             return JSONResponse(status_code=503, content={"status": "unready", "reason": "redis_offline", "error": str(e)})
             
+    # Verify Anthropic API Configuration
+    if not settings.anthropic_api_key and not os.getenv("ANTHROPIC_API_KEY"):
+        return JSONResponse(status_code=503, content={"status": "unready", "reason": "anthropic_api_key_missing"})
+
     # Avoid making every readiness probe depend on an external paid API.
     if settings.is_production():
         try:
@@ -2049,7 +2080,8 @@ async def get_campaign_leads(user: UserPrincipal = Depends(RoleChecker(["viewer"
         try:
             if os.path.exists(CAMPAIGN_LEADS_FILE):
                 with open(CAMPAIGN_LEADS_FILE, "r") as f:
-                    return json.load(f)
+                    all_leads = json.load(f)
+                return [lead for lead in all_leads if lead.get("tenant_id") == user.tenant_id]
         except Exception as e:
             return {"error": str(e)}
     return []
@@ -2067,6 +2099,7 @@ async def add_campaign_lead(lead: dict, user: UserPrincipal = Depends(RoleChecke
             lead_id = "lead_" + str(uuid.uuid4())[:8]
             new_lead = {
                 "id": lead_id,
+                "tenant_id": user.tenant_id,
                 "name": lead.get("name", "Prospect"),
                 "company": lead.get("company", "Acme Corp"),
                 "phone": lead.get("phone", ""),
@@ -2101,7 +2134,7 @@ async def dial_campaign_lead(payload: dict, user: UserPrincipal = Depends(RoleCh
                     leads = json.load(f)
                     
                 for l in leads:
-                     if l["id"] == lead_id:
+                     if l["id"] == lead_id and l.get("tenant_id") == user.tenant_id:
                         l["status"] = "Dialing" if l["retry_count"] == 0 else "Retrying"
                         lead_to_dial = l.copy()
                         break
@@ -2248,7 +2281,17 @@ async def get_call_logs(user: UserPrincipal = Depends(RoleChecker(["viewer", "ag
         registry_path = "recordings/local_call_logs.json"
         if os.path.exists(registry_path):
             with open(registry_path, "r") as f:
-                return json.load(f)
+                all_logs = json.load(f)
+            return [log for log in all_logs if log.get("tenant_id") == user.tenant_id]
     except Exception as err:
         log_error("local_registry_query_error", f"Local registry read error: {err}")
     return []
+
+# Initialize Notifications Subsystem
+try:
+    from server.notifications.service import setup_notifications
+    setup_notifications()
+    log_info("startup_notifications", "Notification subsystem initialized and subscribed to EventBus.")
+except Exception as e:
+    log_error("startup_notifications_failed", f"Failed to initialize notifications: {e}")
+

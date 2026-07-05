@@ -235,7 +235,7 @@ class LLMProviderFallbackChain:
     Failures within 60s trigger dynamic fallbacks.
     """
     def __init__(self):
-        self.active_provider = "google"
+        self.active_provider = "claude"
         self.failures_timestamps: List[float] = []
         self.lock = asyncio.Lock()
         
@@ -250,12 +250,9 @@ class LLMProviderFallbackChain:
             
             if len(self.failures_timestamps) >= 3:
                 # Trigger failover transition
-                if self.active_provider == "google":
-                    self.active_provider = "gpt4o"
-                    logger.warn("llm_circuit_breaker_tripped", msg="Google failed 3x in 60s. Failing over to GPT-4o.")
-                elif self.active_provider == "gpt4o":
+                if self.active_provider == "claude":
                     self.active_provider = "emergency"
-                    logger.warn("llm_circuit_breaker_tripped", msg="GPT-4o failed 3x in 60s. Transitioning to Emergency local scripted responses.")
+                    logger.warn("llm_circuit_breaker_tripped", msg="Claude failed 3x in 60s. Transitioning to Emergency local scripted responses.")
                 self.failures_timestamps.clear() # Clear stamps post-transition
 
     async def execute_llm_call(self, provider_calls: Dict[str, Callable[[], Any]]) -> str:
@@ -263,10 +260,8 @@ class LLMProviderFallbackChain:
         current = self.active_provider
         
         try:
-            if current == "google":
-                return await provider_calls["google"]()
-            elif current == "gpt4o":
-                return await provider_calls["gpt4o"]()
+            if current == "claude":
+                return await provider_calls["claude"]()
             else:
                 return await provider_calls["emergency"]()
         except Exception as e:

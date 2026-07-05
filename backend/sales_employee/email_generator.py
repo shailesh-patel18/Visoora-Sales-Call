@@ -8,10 +8,12 @@ class AIEmailGenerator:
         agent_id: str,
         lead: Dict[str, Any],
         history: List[Dict[str, Any]],
-        original_subject: Optional[str] = None
+        original_subject: Optional[str] = None,
+        public_base_url: Optional[str] = None
     ) -> EmailDraft:
         """
         Generates a context-aware follow-up email, ensuring no repetition and proper threading.
+        Appends an unsubscribe link at the bottom.
         """
         # Fetch persona/RAG knowledge
         context = knowledge_service.build_persona_context(tenant_id, agent_id, lead.get("company_name", ""))
@@ -69,6 +71,11 @@ class AIEmailGenerator:
                 "If not, no worries at all. Feel free to reach out whenever the timing is better.\n\n"
                 f"Thanks again,\n{agent_name}"
             )
+            
+        # Append dynamic unsubscribe footer
+        base_url = (public_base_url or "http://localhost:8000").rstrip("/")
+        unsub_link = f"\n\n---\nIf you no longer wish to receive these emails, you can unsubscribe here: {base_url}/api/v1/sales-employee/leads/unsubscribe?lead_id={lead.get('id')}"
+        body += unsub_link
             
         return EmailDraft(
             subject=subject,

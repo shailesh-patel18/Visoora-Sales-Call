@@ -4,6 +4,7 @@ import uuid
 import math
 import time
 import smtplib
+import asyncio
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Any, Dict, Optional, List
@@ -21,7 +22,8 @@ class EmailProviderInterface(abc.ABC):
         body: str,
         from_email: str,
         connection_config: Dict[str, Any],
-        prev_msg_id: Optional[str] = None
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
         Sends an email using the provider configuration.
@@ -31,16 +33,26 @@ class EmailProviderInterface(abc.ABC):
 
 class GmailOAuthProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         # Gmail OAuth API endpoint. Real integration would use the access token.
-        # Fallback to mock/test modes if in sandbox.
         token = connection_config.get("access_token", "mock_access_token")
-        msg_id = f"<{uuid.uuid4()}@gmail.com>"
-        logger.info("gmail_oauth_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id)
         
-        # Simulating API request to Google Mail API
-        # In a real setup, we would refresh token and POST to /gmail/v1/users/me/messages/send
+        # Simulating API request to Google Mail API.
+        # Check if the token is expired/revoked to raise exception for retries
+        if "invalid" in token or "expired" in token:
+            raise RuntimeError("Gmail credentials invalid or expired (401 Unauthorized)")
+            
+        msg_id = f"<{uuid.uuid4()}@gmail.com>"
+        logger.info("gmail_oauth_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id, headers=extra_headers)
+        
         return {
             "provider": "gmail",
             "message_id": msg_id,
@@ -50,10 +62,21 @@ class GmailOAuthProvider(EmailProviderInterface):
 
 class OutlookOAuthProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
+        token = connection_config.get("access_token", "mock_access_token")
+        if "invalid" in token or "expired" in token:
+            raise RuntimeError("Outlook credentials invalid or expired (401 Unauthorized)")
+            
         msg_id = f"<{uuid.uuid4()}@outlook.com>"
-        logger.info("outlook_oauth_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id)
+        logger.info("outlook_oauth_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id, headers=extra_headers)
         return {
             "provider": "outlook",
             "message_id": msg_id,
@@ -63,7 +86,14 @@ class OutlookOAuthProvider(EmailProviderInterface):
 
 class SMTPProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         host = connection_config.get("host")
         port = int(connection_config.get("port", 587))
@@ -83,14 +113,22 @@ class SMTPProvider(EmailProviderInterface):
             msg["In-Reply-To"] = prev_msg_id
             msg["References"] = prev_msg_id
             
+        # Append unsubscribe and custom headers
+        for k, v in (extra_headers or {}).items():
+            msg[k] = v
+            
         msg.attach(MIMEText(body, "plain", "utf-8"))
         
         # Test mode mock check to prevent running network code in unit tests
         if os.getenv("APP_ENV") in ("development", "test") or host == "mock_smtp":
-            logger.info("smtp_send_mock", host=host, port=port, to=to_email, msg_id=new_msg_id)
+            # Simulate failure if credentials indicate so
+            if "invalid" in password or "expired" in password:
+                raise RuntimeError("SMTP connection failed: 535 Authentication Failed")
+            logger.info("smtp_send_mock", host=host, port=port, to=to_email, msg_id=new_msg_id, headers=extra_headers)
             return {"provider": "smtp", "message_id": new_msg_id, "status": "sent", "details": {"mocked": True}}
             
-        try:
+        # Run blocking network socket logic inside an asyncio thread pool executor
+        def _sync_smtp_send():
             if use_ssl:
                 server = smtplib.SMTP_SSL(host, port, timeout=10.0)
             else:
@@ -101,6 +139,8 @@ class SMTPProvider(EmailProviderInterface):
             server.sendmail(from_email, [to_email], msg.as_string())
             server.quit()
             
+        try:
+            await asyncio.to_thread(_sync_smtp_send)
             logger.info("smtp_send_success", to=to_email, msg_id=new_msg_id)
             return {"provider": "smtp", "message_id": new_msg_id, "status": "sent"}
         except Exception as exc:
@@ -109,7 +149,14 @@ class SMTPProvider(EmailProviderInterface):
 
 class SendGridProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         api_key = connection_config.get("api_key", os.getenv("SENDGRID_API_KEY", ""))
         
@@ -117,10 +164,14 @@ class SendGridProvider(EmailProviderInterface):
         if prev_msg_id:
             headers["In-Reply-To"] = prev_msg_id
             headers["References"] = prev_msg_id
+        if extra_headers:
+            headers.update(extra_headers)
 
         if os.getenv("APP_ENV") in ("development", "test") or api_key == "mock":
+            if "invalid" in api_key or "expired" in api_key:
+                raise RuntimeError("SendGrid authentication failed (Invalid API Key)")
             new_msg_id = f"sg_mock_{uuid.uuid4()}"
-            logger.info("sendgrid_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id)
+            logger.info("sendgrid_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id, headers=headers)
             return {"provider": "sendgrid", "message_id": new_msg_id, "status": "sent", "details": {"mocked": True}}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -149,7 +200,14 @@ class SendGridProvider(EmailProviderInterface):
 
 class ResendProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         api_key = connection_config.get("api_key", "")
         
@@ -157,10 +215,14 @@ class ResendProvider(EmailProviderInterface):
         if prev_msg_id:
             headers["In-Reply-To"] = prev_msg_id
             headers["References"] = prev_msg_id
+        if extra_headers:
+            headers.update(extra_headers)
 
         if os.getenv("APP_ENV") in ("development", "test") or api_key == "mock":
+            if "invalid" in api_key or "expired" in api_key:
+                raise RuntimeError("Resend authentication failed (Invalid API Key)")
             new_msg_id = f"re_mock_{uuid.uuid4()}"
-            logger.info("resend_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id)
+            logger.info("resend_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id, headers=headers)
             return {"provider": "resend", "message_id": new_msg_id, "status": "sent", "details": {"mocked": True}}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -189,11 +251,17 @@ class ResendProvider(EmailProviderInterface):
 
 class SESProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        # Mocked SES integration
         msg_id = f"ses_mock_{uuid.uuid4()}"
-        logger.info("ses_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id)
+        logger.info("ses_send_mock", to=to_email, from_addr=from_email, msg_id=msg_id, headers=extra_headers)
         return {
             "provider": "ses",
             "message_id": msg_id,
@@ -203,7 +271,14 @@ class SESProvider(EmailProviderInterface):
 
 class PostmarkProvider(EmailProviderInterface):
     async def send_email(
-        self, to_email: str, subject: str, body: str, from_email: str, connection_config: Dict[str, Any], prev_msg_id: Optional[str] = None
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         api_key = connection_config.get("api_key", "")
         
@@ -211,10 +286,14 @@ class PostmarkProvider(EmailProviderInterface):
         if prev_msg_id:
             headers.append({"Name": "In-Reply-To", "Value": prev_msg_id})
             headers.append({"Name": "References", "Value": prev_msg_id})
+        for k, v in (extra_headers or {}).items():
+            headers.append({"Name": k, "Value": v})
 
         if os.getenv("APP_ENV") in ("development", "test") or api_key == "mock":
+            if "invalid" in api_key or "expired" in api_key:
+                raise RuntimeError("Postmark authentication failed (Invalid API Key)")
             new_msg_id = f"pm_mock_{uuid.uuid4()}"
-            logger.info("postmark_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id)
+            logger.info("postmark_send_mock", to=to_email, from_addr=from_email, msg_id=new_msg_id, headers=headers)
             return {"provider": "postmark", "message_id": new_msg_id, "status": "sent", "details": {"mocked": True}}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -257,7 +336,8 @@ async def send_via_mailbox(
     to_email: str,
     subject: str,
     body: str,
-    prev_msg_id: Optional[str] = None
+    prev_msg_id: Optional[str] = None,
+    extra_headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Router method to fetch the correct EmailProviderInterface and dispatch the email.
@@ -277,7 +357,6 @@ async def send_via_mailbox(
     try:
         connection_config = json.loads(decrypt_value(encrypted_config))
     except Exception:
-        # If decryption fails (e.g. in test fixtures or mock strings), use it as is if it's JSON
         try:
             connection_config = json.loads(encrypted_config)
         except Exception:
@@ -289,5 +368,6 @@ async def send_via_mailbox(
         body=body,
         from_email=from_email,
         connection_config=connection_config,
-        prev_msg_id=prev_msg_id
+        prev_msg_id=prev_msg_id,
+        extra_headers=extra_headers
     )

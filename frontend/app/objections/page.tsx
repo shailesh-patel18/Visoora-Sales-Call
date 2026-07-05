@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useOnboardingStore } from "../onboarding/store";
 import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 
 interface ObjectionItem {
   objection: string;
@@ -20,14 +21,10 @@ interface MissedObjection {
   confidence: number;
 }
 
-const mockMissedObjections: MissedObjection[] = [
-  { id: "mo_1", trigger: "We already use Salesforce CRM, why do we need this?", callInfo: "Call with Sarah Connor (2m 34s)", confidence: 64 },
-  { id: "mo_2", trigger: "Does this require us to port our existing business number?", callInfo: "Call with Bruce Wayne (1m 12s)", confidence: 72 },
-  { id: "mo_3", trigger: "I'm not the right person, you should talk to our VP of Ops.", callInfo: "Call with Hal Jordan (5m 01s)", confidence: 81 }
-];
+const mockMissedObjections: MissedObjection[] = [];
 
 export default function ObjectionsPage() {
-  const { state, loadProgress, saveProgress } = useOnboardingStore();
+  const { state, loadProgress, saveProgress, completeOnboarding } = useOnboardingStore();
   const [mounted, setMounted] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -43,13 +40,11 @@ export default function ObjectionsPage() {
 
   // Initialize values from store
   useEffect(() => {
-    if (state.step3) {
-      setObjections(state.step3.objectionsList || [
-        { objection: "Pricing is too expensive.", rebuttal: "I understand. Many clients start where you are but see immediate ROI through 40% higher bookings." },
-        { objection: "AI sounds too mechanical.", rebuttal: "That's a fair point, but our agents match natural human speech patterns and pauses in real-time." }
-      ]);
-    }
-  }, [state.step3]);
+    setObjections(state.step8?.objectionsList || [
+      { objection: "Pricing is too expensive.", rebuttal: "I understand. Many clients start where you are but see immediate ROI through 40% higher bookings." },
+      { objection: "AI sounds too mechanical.", rebuttal: "That's a fair point, but our agents match natural human speech patterns and pauses in real-time." }
+    ]);
+  }, [state.step8]);
 
   const handleAddObjection = () => {
     setObjections([...objections, { objection: "", rebuttal: "" }]);
@@ -80,59 +75,20 @@ export default function ObjectionsPage() {
   };
 
   const handleSaveObjections = async () => {
-    if (!state.step3) return;
     setIsSaving(true);
-
-    const updatedStep3 = {
-      ...state.step3,
-      objectionsList: objections.filter(o => o.objection && o.rebuttal), // Filter empty items
-    };
 
     const mergedState = {
       ...state,
-      step3: updatedStep3,
+      step8: {
+        objectionsList: objections.filter(o => o.objection && o.rebuttal),
+      },
     };
 
     await saveProgress(mergedState);
 
     // Call onboarding/complete endpoint to trigger server config DB sync
     try {
-      await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tenant_id: "default_shared_tenant",
-          company_name: state.step1?.companyName || "Unknown",
-          website: state.step1?.website || "",
-          industry: state.step1?.industry || "",
-          team_size: state.step1?.teamSize || "",
-          annual_revenue: state.step1?.annualRevenue || "",
-          target_region: state.step1?.targetRegion || "",
-          phone_number: state.step2?.twilioNumber || "",
-          agent_name: state.step3?.agentName || "Alex",
-          company_description: state.step3?.companyDescription || "",
-          value_proposition: state.step3?.valueProposition || "",
-          voice: state.step3?.voice || "rachel",
-          tone: state.step3?.tone || "consultative",
-          timezone: state.step3?.timezone || "America/New_York",
-          calling_hours_start: state.step3?.callingHoursStart || "08:00",
-          calling_hours_end: state.step3?.callingHoursEnd || "17:00",
-          product_name: state.step3?.productName || "",
-          product_price: state.step3?.productPrice || "",
-          product_features: state.step3?.productFeatures || "",
-          target_audience: state.step3?.targetAudience || "",
-          kb_description: state.step3?.kbDescription || "",
-          kb_faqs: state.step3?.kbFaqs || [],
-          objections_list: updatedStep3.objectionsList,
-          recording_disclosure: state.step4?.recordingDisclosure || false,
-          consent_confirmed: state.step4?.consentConfirmed || false,
-          country: state.step4?.country || "US",
-          import_source: state.step5?.importSource || "csv",
-          campaign_goal: state.step5?.campaignGoal || "",
-          playbook_greeting: state.step5?.playbookGreeting || "",
-          playbook_booking_link: state.step5?.playbookBookingLink || "",
-        }),
-      });
+      await completeOnboarding();
     } catch (err) {
       console.warn("DB update failed: ", err);
     }
@@ -257,7 +213,7 @@ export default function ObjectionsPage() {
             <div className="space-y-3 mt-2">
               {missedObjections.length === 0 ? (
                 <div className="p-6 rounded-lg border border-dashed text-center text-xs text-neutral-400" style={{ borderColor: "hsl(var(--border-default))" }}>
-                  Missed objections queue is empty! Your agent is fully aligned with recent conversations.
+                  No flagged objections yet — they'll appear here after your first calls.
                 </div>
               ) : (
                 missedObjections.map((mo) => (

@@ -1,0 +1,34 @@
+workflow:
+  id: business_understanding
+  version: 1.0
+
+goal: Understand Customer Business
+
+steps:
+  - id: website_analysis
+    action: analyze_website
+    agent: ResearchAgent
+    inputs:
+      url: "{{artifacts.website_url}}"
+      scraped_text: "Visoora provides AI sales tools. It helps companies grow revenue."
+    depends_on: []
+    retries: 3
+    requires_approval: false
+
+  - id: lead_scoring
+    action: score_lead
+    agent: ProspectingAgent
+    inputs:
+      context_str: "{{artifacts.business_summary}}"
+    depends_on: ["website_analysis"]
+    retries: 2
+    requires_approval: false
+
+  - id: email_draft
+    action: draft_email
+    agent: EmailAgent
+    inputs:
+      context_str: "{{artifacts.business_summary}}"
+    depends_on: ["website_analysis"]
+    retries: 1
+    requires_approval: false

@@ -21,6 +21,7 @@ class RedisRateLimiter:
         # Local thread-safe in-memory fallback registries
         self._local_daily: Dict[str, List[float]] = {}  # tenant_id -> list of timestamps
         self._local_concurrent: Dict[str, set] = {}     # tenant_id -> set of active call_sids
+        self._local_endpoints: Dict[str, List[float]] = {} # endpoint:tenant_id -> list of timestamps
         self._lock = asyncio.Lock()
 
     async def connect(self) -> bool:
@@ -212,6 +213,60 @@ class RedisRateLimiter:
                     call_sid=call_sid,
                     active_calls=len(self._local_concurrent[tenant_id])
                 )
+
+    async def check_rate_limit(self, tenant_id: str, endpoint: str, limit: int, window_seconds: int) -> bool:
+        """
+        Generic sliding window rate limiter for specific endpoints.
+        Raises RateLimitExceededException if exceeded.
+        """
+        if self.redis is None:
+            await self.connect()
+            
+        now = time.time()
+        
+        # ----------------------------------------------------
+        # REDIS PATHWAY
+        # ----------------------------------------------------
+        if self.is_connected and self.redis:
+            key = f"ratelimit:endpoint:{endpoint}:{tenant_id}"
+            try:
+                await self.redis.zremrangebyscore(key, 0, now - window_seconds)
+                count = await self.redis.zcard(key)
+                
+                if count >= limit:
+                    logger.warn("rate_limit_endpoint_breached", tenant_id=tenant_id, endpoint=endpoint, count=count, limit=limit)
+                    raise RateLimitExceededException(f"Rate limit exceeded for {endpoint}.")
+                
+                pipe = self.redis.pipeline()
+                pipe.zadd(key, {str(uuid.uuid4()): now})
+                pipe.expire(key, window_seconds)
+                await pipe.execute()
+                return True
+            except RateLimitExceededException:
+                raise
+            except Exception as e:
+                self.is_connected = False
+                logger.error("redis_runtime_failure_endpoint", message="Redis failed for endpoint limiter.", error=str(e))
+                # Fall through
+                
+        # ----------------------------------------------------
+        # IN-MEMORY FALLBACK PATHWAY
+        # ----------------------------------------------------
+        async with self._lock:
+            key = f"{endpoint}:{tenant_id}"
+            if key not in self._local_endpoints:
+                self._local_endpoints[key] = []
+                
+            timestamps = self._local_endpoints[key]
+            self._local_endpoints[key] = [t for t in timestamps if t > now - window_seconds]
+            count = len(self._local_endpoints[key])
+            
+            if count >= limit:
+                logger.warn("rate_limit_endpoint_breached_local", tenant_id=tenant_id, endpoint=endpoint, count=count, limit=limit)
+                raise RateLimitExceededException(f"Rate limit exceeded for {endpoint} (Local).")
+                
+            self._local_endpoints[key].append(now)
+            return True
 
 # Instantiate singleton rate limiter
 rate_limiter = RedisRateLimiter(redis_url=settings.redis_url)

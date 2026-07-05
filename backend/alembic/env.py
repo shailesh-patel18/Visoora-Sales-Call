@@ -57,8 +57,18 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
+    import os
+    from dotenv import load_dotenv
+    load_dotenv()
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL must be set in .env")
+
+    config_section = config.get_section(config.config_ini_section, {})
+    config_section["sqlalchemy.url"] = db_url
+
     connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
+        config_section,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )

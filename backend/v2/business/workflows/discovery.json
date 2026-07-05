@@ -1,0 +1,42 @@
+{
+    "workflow_name": "Autopilot_Discovery_and_Prospecting",
+    "version": 1,
+    "steps": [
+        {
+            "step_id": "step_1_research_company",
+            "action": "execute_agent",
+            "agent_type": "ResearchAgent",
+            "depends_on": [],
+            "payload": {
+                "instruction": "Analyze the company website and extract the core value proposition."
+            }
+        },
+        {
+            "step_id": "step_2_generate_icp",
+            "action": "execute_agent",
+            "agent_type": "ResearchAgent",
+            "depends_on": ["step_1_research_company"],
+            "payload": {
+                "instruction": "Based on the value proposition, define the Ideal Customer Profile."
+            }
+        },
+        {
+            "step_id": "step_3_approve_icp",
+            "action": "request_approval",
+            "agent_type": null,
+            "depends_on": ["step_2_generate_icp"],
+            "payload": {
+                "context": "Please review the AI-generated ICP before we begin spending credits to find prospects."
+            }
+        },
+        {
+            "step_id": "step_4_find_prospects",
+            "action": "execute_agent",
+            "agent_type": "ProspectingAgent",
+            "depends_on": ["step_3_approve_icp"],
+            "payload": {
+                "instruction": "Use the approved ICP to find 50 highly qualified prospects."
+            }
+        }
+    ]
+}

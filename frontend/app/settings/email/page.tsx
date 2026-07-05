@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { BACKEND_URL } from "../../config";
+import { getAuthHeaders } from "../../auth/store";
 
 interface Mailbox {
   id: string;
@@ -51,7 +52,7 @@ export default function EmailAccountsPage() {
     setLoading(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/mailboxes`, {
-        headers: { "X-Tenant-ID": "acme_tenant" },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -74,7 +75,7 @@ export default function EmailAccountsPage() {
       const res = await fetch(
         `${BACKEND_URL}/api/v1/sales-employee/mailboxes/oauth/authorize?provider=${prov}`,
         {
-          headers: { "X-Tenant-ID": "acme_tenant" },
+          headers: getAuthHeaders(),
         }
       );
       if (res.ok) {
@@ -121,8 +122,8 @@ export default function EmailAccountsPage() {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/mailboxes`, {
         method: "POST",
         headers: {
+          ...getAuthHeaders(),
           "Content-Type": "application/json",
-          "X-Tenant-ID": "acme_tenant",
         },
         body: JSON.stringify({
           email,
@@ -154,7 +155,7 @@ export default function EmailAccountsPage() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/mailboxes/${id}/default`, {
         method: "PUT",
-        headers: { "X-Tenant-ID": "acme_tenant" },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         fetchMailboxes();
@@ -169,7 +170,7 @@ export default function EmailAccountsPage() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/mailboxes/${id}`, {
         method: "DELETE",
-        headers: { "X-Tenant-ID": "acme_tenant" },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         fetchMailboxes();

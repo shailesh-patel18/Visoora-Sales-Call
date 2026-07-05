@@ -19,7 +19,8 @@
     "react-is": "^19.2.6",
     "recharts": "^3.8.1",
     "zod": "^4.4.3",
-    "zustand": "^5.0.13"
+    "zustand": "^5.0.13",
+    "@sentry/nextjs": "^8.0.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
