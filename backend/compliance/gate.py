@@ -1,4 +1,5 @@
 import os
+import tempfile
 import datetime
 import json
 import uuid
@@ -61,9 +62,12 @@ class ConsentRequiredException(ComplianceException):
 # ----------------------------------------------------
 # FILE-BASED THREAD-SAFE LOCAL FALLBACK REGISTRIES
 # ----------------------------------------------------
-LOCAL_DNC_FILE = "recordings/local_dnc.json"
-LOCAL_CONSENT_FILE = "recordings/local_consents.json"
-LOCAL_COMPLIANCE_SETTINGS_FILE = "recordings/local_tenant_compliance.json"
+_recordings_dir = os.path.join(tempfile.gettempdir(), "visoora_recordings")
+os.makedirs(_recordings_dir, exist_ok=True)
+
+LOCAL_DNC_FILE = os.path.join(_recordings_dir, "local_dnc.json")
+LOCAL_CONSENT_FILE = os.path.join(_recordings_dir, "local_consents.json")
+LOCAL_COMPLIANCE_SETTINGS_FILE = os.path.join(_recordings_dir, "local_tenant_compliance.json")
 
 for f_path in [LOCAL_DNC_FILE, LOCAL_CONSENT_FILE]:
     if not os.path.exists(f_path):
