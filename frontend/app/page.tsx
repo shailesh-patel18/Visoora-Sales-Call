@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { PublicNavbar } from "./components/public-navbar";
 import { PublicFooter } from "./components/public-footer";
+import { BACKEND_URL } from "./config";
 
 /* ======================================================
    SECTION WRAPPER — scroll-triggered fade-in
@@ -153,7 +154,7 @@ export default function Home() {
     }, 4500);
 
     try {
-      const res = await fetch("http://localhost:8000/api/public/analyze-website", {
+      const res = await fetch(`${BACKEND_URL}/api/public/analyze-website`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: demoUrl, captcha_token: "test-bypass" })
@@ -169,7 +170,7 @@ export default function Home() {
       
       if (data.cached && data.result_id) {
           // It's cached! Fetch the report directly.
-          const reportRes = await fetch(`http://localhost:8000/api/public/report/${data.result_id}`);
+          const reportRes = await fetch(`${BACKEND_URL}/api/public/report/${data.result_id}`);
           if (reportRes.ok) {
               const reportData = await reportRes.json();
               setAnalysisData(reportData);
@@ -183,7 +184,7 @@ export default function Home() {
       }
       
       // Connect to SSE stream for progressive loading
-      const eventSource = new EventSource(`http://localhost:8000/api/public/workflow/${data.job_id}/stream`);
+      const eventSource = new EventSource(`${BACKEND_URL}/api/public/workflow/${data.job_id}/stream`);
       
       eventSource.onmessage = (event) => {
           const payload = JSON.parse(event.data);

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import DemoReport from "../../components/DemoReport";
 import { PublicNavbar } from "../../components/public-navbar";
 import { PublicFooter } from "../../components/public-footer";
+import { BACKEND_URL } from "../../config";
 
 export default function ReportPage() {
   const { id } = useParams();
@@ -19,7 +20,7 @@ export default function ReportPage() {
 
     const fetchReport = async () => {
       try {
-        const res = await fetch(`http://localhost:8000/api/public/report/${id}`);
+        const res = await fetch(`${BACKEND_URL}/api/public/report/${id}`);
         if (!res.ok) {
           throw new Error("Failed to load report or report expired.");
         }
