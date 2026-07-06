@@ -37,7 +37,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Run as non-privileged system user for absolute security boundaries
-RUN useradd -u 10001 -m app
+RUN useradd -u 10001 -m app && chown -R app:app /app
 USER app
 
 # Copy wheels/packages from builder stage
