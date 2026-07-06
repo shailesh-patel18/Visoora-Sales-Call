@@ -57,8 +57,10 @@ class CallSessionTracker:
         self.lock = asyncio.Lock()
         
         # Ensure a local directory exists for fallback recording persistence
-        os.makedirs("recordings", exist_ok=True)
-        self.local_registry_path = "recordings/local_call_logs.json"
+        import tempfile
+        self.recordings_dir = os.path.join(tempfile.gettempdir(), "visoora_recordings")
+        os.makedirs(self.recordings_dir, exist_ok=True)
+        self.local_registry_path = os.path.join(self.recordings_dir, "local_call_logs.json")
         if not os.path.exists(self.local_registry_path):
             with open(self.local_registry_path, "w") as f:
                 json.dump([], f)
@@ -176,7 +178,7 @@ class CallSessionTracker:
                 print(f"[Storage Manager] Supabase storage upload failed: {e}. Cascading to local fallback.")
                 
         # 3. Local Fallback Operations
-        local_path = f"recordings/{filename}"
+        local_path = os.path.join(self.recordings_dir, filename)
         with open(local_path, "wb") as f:
             f.write(wav_data)
             
