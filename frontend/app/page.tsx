@@ -88,7 +88,7 @@ function WorkflowStep({
       initial={{ opacity: 0, scale: 0.8 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ delay, duration: 0.5 }}
-      className={`flex flex-col items-center gap-2 transition-all duration-500 ${
+      className={`flex flex-col items-center gap-2 shrink-0 snap-center transition-all duration-500 ${
         isActive ? "scale-110" : "opacity-60"
       }`}
     >
@@ -261,7 +261,7 @@ export default function Home() {
     {
       icon: Brain,
       title: "AI Business Brain",
-      desc: "Builds a deep knowledge graph of your business — ICP segments, buyer personas, competitive advantages, and objection handling playbooks.",
+      desc: "Builds a deep knowledge graph of your business, including ICP segments, buyer personas, competitive advantages, and objection handling playbooks.",
     },
     {
       icon: Search,
@@ -271,7 +271,7 @@ export default function Home() {
     {
       icon: Target,
       title: "Explainable Lead Scoring",
-      desc: "Scores every lead against your ICP with transparent reasoning — matching factors, confidence scores, and data sources. Not a black box.",
+      desc: "Scores every lead against your ICP with transparent reasoning, detailing matching factors, confidence scores, and data sources. Not a black box.",
     },
     {
       icon: Phone,
@@ -301,7 +301,7 @@ export default function Home() {
   const faqs = [
     {
       q: "Can AI replace my SDR team?",
-      a: "Visoora doesn't replace your team — it amplifies them. The AI handles research, scoring, and initial outreach so your people focus on closing deals and building relationships. Think of it as giving every rep a senior research analyst.",
+      a: "Visoora does not replace your team; it amplifies them. The AI handles research, scoring, and initial outreach so your people focus on closing deals and building relationships. Think of it as giving every rep a senior research analyst.",
     },
     {
       q: "How secure is my data?",
@@ -379,8 +379,7 @@ export default function Home() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="mt-6 text-lg sm:text-xl text-[hsl(var(--text-secondary))] max-w-2xl leading-relaxed"
         >
-          Visoora doesn&apos;t just automate sales — it first understands your
-          business, then continuously identifies where and how you should grow.
+          Visoora goes beyond mere sales automation. We begin by deeply understanding the core of your business, enabling us to continuously identify and execute on the most strategic growth opportunities.
         </motion.p>
 
         <motion.div
@@ -418,7 +417,7 @@ export default function Home() {
           {/* Glow behind active step */}
           <div className="absolute inset-0 bg-gradient-to-b from-[hsla(var(--brand-primary),0.03)] to-transparent pointer-events-none" />
 
-          <div className="flex items-center justify-between gap-2 sm:gap-4 relative z-10">
+          <div className="flex items-center justify-start sm:justify-between gap-6 sm:gap-4 relative z-10 overflow-x-auto pb-4 sm:pb-0 w-full snap-x snap-mandatory [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {heroSteps.map((step, i) => (
               <React.Fragment key={step.label}>
                 <WorkflowStep
@@ -432,7 +431,7 @@ export default function Home() {
                     initial={{ scaleX: 0 }}
                     animate={{ scaleX: 1 }}
                     transition={{ delay: 0.7 + i * 0.1, duration: 0.4 }}
-                    className={`hidden sm:block h-px flex-1 transition-colors duration-500 ${
+                    className={`hidden sm:block h-px min-w-[20px] flex-1 transition-colors duration-500 ${
                       i < activeStep
                         ? "bg-[hsl(var(--brand-primary))]"
                         : "bg-zinc-800"
@@ -447,9 +446,9 @@ export default function Home() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 1.2 }}
-            className="text-center text-sm text-[hsl(var(--text-muted))] mt-6"
+            className="text-center text-sm text-[hsl(var(--text-muted))] mt-6 px-4"
           >
-            Visoora follows a strategic process — understand first, act second
+            Visoora follows a proven strategic process: understand first, act second.
           </motion.p>
         </motion.div>
       </section>
