@@ -361,7 +361,7 @@ export default function Home() {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-zinc-800 bg-zinc-900/60 text-sm font-medium text-[hsl(var(--brand-primary))] mb-8 hover:border-zinc-700 transition-colors cursor-default"
         >
           <Sparkles className="w-4 h-4" />
-          <span>AI Growth Strategist for B2B Sales</span>
+          <span>AI Revenue Operating System for B2B Sales</span>
         </motion.div>
 
         <motion.h1
@@ -370,7 +370,7 @@ export default function Home() {
           transition={{ duration: 0.6, delay: 0.1 }}
           className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight max-w-4xl leading-[1.1] bg-clip-text text-transparent bg-gradient-to-b from-white via-zinc-100 to-zinc-400"
         >
-          Your AI Growth Strategist That Understands Your Business First
+          Hire an AI Revenue Team That Understands Your Business First
         </motion.h1>
 
         <motion.p
@@ -379,7 +379,7 @@ export default function Home() {
           transition={{ duration: 0.5, delay: 0.2 }}
           className="mt-6 text-lg sm:text-xl text-[hsl(var(--text-secondary))] max-w-2xl leading-relaxed"
         >
-          Visoora goes beyond mere sales automation. We begin by deeply understanding the core of your business, enabling us to continuously identify and execute on the most strategic growth opportunities.
+          Visoora builds a Business Brain unique to your company before researching prospects, writing personalized emails, and executing outbound sales missions. Every recommendation is transparent. Every email is reviewed by you. Every mission is focused on generating revenue.
         </motion.p>
 
         <motion.div
@@ -396,15 +396,29 @@ export default function Home() {
                 "linear-gradient(135deg, hsl(var(--brand-primary)), hsl(var(--brand-accent)))",
             }}
           >
-            Start Free
+            Build My Business Brain
             <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
           </Link>
           <Link
             href="/contact"
             className="w-full sm:w-auto px-8 py-4 rounded-xl font-semibold border border-zinc-800 bg-zinc-900/40 hover:bg-zinc-900 hover:border-zinc-700 transition-all flex items-center justify-center gap-2"
           >
-            <span>Watch Demo</span>
+            <span>Watch a Mission Run</span>
           </Link>
+        </motion.div>
+
+        {/* Trust Statement */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.4 }}
+          className="mt-8 flex flex-col items-center text-sm text-[hsl(var(--text-muted))] max-w-md mx-auto"
+        >
+          <div className="flex items-center gap-2 font-medium">
+            <Shield className="w-4 h-4 text-[hsl(var(--brand-primary))]" />
+            <span>No generic AI. No black-box automation.</span>
+          </div>
+          <span className="mt-1">Every decision is explainable, auditable, and under your control.</span>
         </motion.div>
 
         {/* Hero Animated Workflow */}
