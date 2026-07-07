@@ -28,7 +28,7 @@ export function PublicFooter() {
               </span>
             </Link>
             <p className="text-sm text-[hsl(var(--text-secondary))] max-w-sm leading-relaxed">
-              Compliant, low-latency AI outbound calling platform for growth teams. Automate outreach, qualification, and appointment scheduling safely.
+              An AI Revenue Operating System that researches prospects, drafts personalized outreach, and executes sales missions to build predictable pipeline.
             </p>
             {/* Status Dot */}
             <div className="flex items-center gap-2 mt-2 w-max px-3 py-1.5 rounded-full border border-emerald-950 bg-emerald-950/20 text-emerald-400 text-xs font-medium">
@@ -41,10 +41,10 @@ export function PublicFooter() {
           <div className="flex flex-col gap-4">
             <h4 className="text-sm font-bold text-white uppercase tracking-wider">Product</h4>
             <div className="flex flex-col gap-2.5">
-              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Campaign Runner</span>
-              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Playbook State Builder</span>
-              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Real-time Telemetry</span>
-              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Objection Handler</span>
+              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Business Brain Builder</span>
+              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">AI Research Engine</span>
+              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">ICP Match Scoring</span>
+              <span className="text-sm text-[hsl(var(--text-secondary))] hover:text-white cursor-pointer transition-colors">Autonomous Email Outreach</span>
             </div>
           </div>
 
