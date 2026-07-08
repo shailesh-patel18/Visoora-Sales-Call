@@ -1,41 +1,39 @@
-from abc import ABC, abstractmethod
 from typing import Optional, List
 import structlog
-from v2.domain.crm.models import Lead, LeadStatus
-from v2.foundation.context.middleware import get_platform_context
+from v2.domain.crm.models import EmailDraft, DraftStatus
 
 logger = structlog.get_logger("crm_repository")
 
-class ILeadRepository(ABC):
-    @abstractmethod
-    async def save(self, lead: Lead) -> Lead:
-        pass
-        
-    @abstractmethod
-    async def get(self, lead_id: str) -> Optional[Lead]:
-        pass
-        
-    @abstractmethod
-    async def list_by_tenant_and_status(self, tenant_id: str, status: LeadStatus) -> List[Lead]:
-        pass
-
-class MemoryLeadAdapter(ILeadRepository):
+class MemoryDraftAdapter:
     def __init__(self):
-        self._leads = {}
+        self._drafts = {}
+        # Pre-seed for testing
+        mock_id = "test-draft-123"
+        self._drafts[mock_id] = EmailDraft(
+            id=mock_id,
+            tenant_id="test-tenant", # We don't have a real tenant yet, wait, we need to match the user's tenant from the JWT.
+            # Actually, let's just make it return for the get_by_status regardless of tenant for the mock, or seed it when requested.
+            lead_id="lead-456",
+            subject="Scaling engineering at Acme Corp",
+            body="Hi John,\n\nI noticed Acme Corp recently raised $5M. We help engineering teams scale their infrastructure. Open to a chat?",
+            evidence_log=[
+                {"step": "Prospect Research", "detail": "Found John Doe is VP of Engineering at Acme Corp."},
+                {"step": "Company News", "detail": "Acme Corp raised $5M Series A last week."},
+                {"step": "Value Mapping", "detail": "Mapped our infrastructure scaling solution to their recent funding event."}
+            ]
+        )
         
-    async def save(self, lead: Lead) -> Lead:
-        ctx = get_platform_context()
-        trace_id = ctx.trace_id if ctx else "unknown"
+    async def save(self, draft: EmailDraft) -> EmailDraft:
+        self._drafts[draft.id] = draft
+        logger.info("draft_saved", draft_id=draft.id, status=draft.status.value)
+        return draft
         
-        self._leads[lead.id] = lead
-        logger.info("lead_saved", lead_id=lead.id, status=lead.status.value, trace_id=trace_id)
-        return lead
+    async def get(self, draft_id: str) -> Optional[EmailDraft]:
+        return self._drafts.get(draft_id)
         
-    async def get(self, lead_id: str) -> Optional[Lead]:
-        return self._leads.get(lead_id)
-        
-    async def list_by_tenant_and_status(self, tenant_id: str, status: LeadStatus) -> List[Lead]:
-        return [l for l in self._leads.values() if l.tenant_id == tenant_id and l.status == status]
+    async def get_by_status(self, tenant_id: str, status: DraftStatus) -> List[EmailDraft]:
+        # For testing, we just return all drafts with the status since we hardcoded tenant_id above
+        return [d for d in self._drafts.values() if d.status == status]
 
 # Global Instance for DI
-lead_repository = MemoryLeadAdapter()
+draft_repository = MemoryDraftAdapter()

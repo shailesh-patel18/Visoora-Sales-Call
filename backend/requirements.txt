@@ -16,6 +16,8 @@ python-multipart>=0.0.9
 pydantic-settings>=2.2.1
 pypdf>=4.0.0
 alembic>=1.13.0
+celery>=5.3.6
+resend>=0.7.1
 
 # Observability stack
 sentry-sdk>=2.0.0

@@ -28,6 +28,7 @@ class SecuritySettings(BaseModel):
     # Runtime and deployment
     sentry_dsn: str = Field(default_factory=lambda: os.getenv("SENTRY_DSN", ""))
     anthropic_api_key: str = Field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY", ""))
+    resend_api_key: str = Field(default_factory=lambda: os.getenv("RESEND_API_KEY", ""))
     app_env: str = Field(default_factory=lambda: os.getenv("APP_ENV", os.getenv("ENVIRONMENT", "development")).lower())
     server_public_domain: str = Field(default_factory=lambda: os.getenv("SERVER_PUBLIC_DOMAIN", ""))
     allowed_origins: List[str] = Field(default_factory=lambda: [

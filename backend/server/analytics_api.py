@@ -90,6 +90,39 @@ def _aggregate_from_local_logs(tenant_id: str) -> Dict[str, Any]:
         "source": "empty"
     }
 
+from v2.domain.crm.lead_repository import lead_repository
+from v2.domain.crm.repository import draft_repository
+from v2.mission.repository import mission_repository
+
+@analytics_router.get("/dashboard/revenue")
+async def get_revenue_dashboard_metrics(user: UserPrincipal = Depends(get_current_user)):
+    """
+    Returns actual CRM metrics (Leads, Pipeline, Pending Drafts).
+    """
+    tenant_id = user.tenant_id
+    
+    # 1. Active Missions
+    active_missions = await mission_repository.get_active_by_tenant(tenant_id)
+    active_missions_count = len(active_missions)
+    
+    # 2. Leads Researched (CRM)
+    leads = await lead_repository.get_by_tenant(tenant_id)
+    leads_count = len(leads)
+    
+    # 3. Pipeline Value (Avg Deal Size = $5000)
+    avg_deal_size = 5000
+    pipeline_value = leads_count * avg_deal_size
+    
+    # 4. Drafts Pending Approval
+    from v2.domain.crm.models import DraftStatus
+    pending_drafts = await draft_repository.get_by_status(tenant_id, DraftStatus.PENDING_APPROVAL)
+    
+    return {
+        "active_missions_count": active_missions_count,
+        "leads_researched_count": leads_count,
+        "pipeline_value": pipeline_value,
+        "drafts_pending_count": len(pending_drafts)
+    }
 
 @analytics_router.get("/dashboard")
 async def get_dashboard_metrics(user: UserPrincipal = Depends(get_current_user)):

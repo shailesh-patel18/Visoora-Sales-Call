@@ -540,6 +540,10 @@ app.include_router(ws_mission_router)
 from security.auth_router import auth_router
 app.include_router(auth_router, prefix="/api/v1")
 
+# Include draft router
+from server.draft_router import router as draft_router
+app.include_router(draft_router, prefix="/api/v1")
+
 # Prometheus metrics endpoint — unprotected for scraper access
 @app.get("/metrics")
 async def prometheus_metrics():

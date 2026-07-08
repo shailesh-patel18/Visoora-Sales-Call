@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f9fafb; margin: 0; padding: 40px 0; color: #111827; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; }
+        .logo { font-size: 24px; font-weight: 700; margin-bottom: 24px; color: #111827; }
+        h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+        p { font-size: 16px; line-height: 1.5; color: #374151; margin-bottom: 24px; }
+        .button { display: inline-block; background-color: #111827; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 500; font-size: 14px; margin-bottom: 24px; }
+        .footer { margin-top: 32px; font-size: 12px; color: #9ca3af; text-align: center; }
+        .footer a { color: #6b7280; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Visoora</div>
+        <h1>Welcome aboard, {{ .Name }}</h1>
+        <p>Visoora is your AI Revenue Operating System. We understand your business first, then automate your outbound sales pipeline so you can focus on closing deals.</p>
+        <p>To get the most out of Visoora, your first step is to configure your <strong>Business Brain</strong>. This context allows our AI agents to speak perfectly in your brand's voice.</p>
+        <a href="{{ .AppURL }}/onboarding" class="button" style="color: #ffffff;">Configure Business Brain</a>
+    </div>
+    <div class="footer">
+        <p>&copy; 2026 Visoora Inc. All rights reserved.<br>
+        <a href="https://visoora.com/privacy">Privacy Policy</a> &bull; <a href="https://visoora.com/terms">Terms of Service</a></p>
+    </div>
+</body>
+</html>

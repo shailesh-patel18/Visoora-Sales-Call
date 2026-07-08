@@ -65,6 +65,8 @@ class EmailDraft(BaseModel):
     subject: str
     body: str
     
+    evidence_log: List[Dict[str, Any]] = Field(default_factory=list)
+    
     status: DraftStatus = DraftStatus.PENDING_APPROVAL
     
     created_at: str = Field(default_factory=lambda: datetime.datetime.utcnow().isoformat())

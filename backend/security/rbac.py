@@ -73,18 +73,16 @@ async def get_current_user(
             "viewer"
         )
         
-        # Resolve Tenant ID (extract domain or read direct claim)
+        # Resolve Tenant ID (extract direct claim only)
         tenant_id = (
             jwt_payload.get("tenant_id") or 
             app_metadata.get("tenant_id") or 
             user_metadata.get("tenant_id")
         )
         if not tenant_id:
-            # Domain-based tenant isolation fallback if tenant_id claim is missing
-            if "@" in email:
-                tenant_id = email.split("@")[1]
-            else:
-                tenant_id = "default_shared_tenant"
+            # Enforce strict multi-tenancy: deny access if no explicit tenant UUID is present
+            logger.warn("missing_tenant_id", message="Token lacks a valid tenant_id claim.", user_id=user_id)
+            raise AuthenticationException("Valid tenant_id claim is required for access.")
                 
         user_principal = UserPrincipal(
             user_id=user_id,
@@ -95,37 +93,15 @@ async def get_current_user(
         )
         
     else:
-        # DEVELOPMENT FALLBACK ONLY:
-        # Grants a local developer admin principal EXCLUSIVELY when:
-        #   1. APP_ENV is explicitly set to "development" (not staging, not production)
-        #   2. AND the request originates from localhost or 127.0.0.1
-        # The ngrok public domain is intentionally excluded — tunneling through ngrok
-        # from a remote host must always present real credentials.
+        # All requests must provide valid credentials, regardless of environment.
         host = request.headers.get("host", "")
-        is_local_host = "localhost" in host or "127.0.0.1" in host
-        is_dev_env = settings.app_env == "development"
-
-        if is_dev_env and is_local_host:
-            user_principal = UserPrincipal(
-                user_id="local_dev_user",
-                email="developer@visoora.local",
-                role="admin",
-                tenant_id="default_shared_tenant",
-                is_m2m=False
-            )
-            logger.info(
-                "local_dev_auth_fallback",
-                message="No credentials provided. Falling back to local developer principal (APP_ENV=development, localhost only)."
-            )
-        else:
-            # Non-dev environment OR request from a non-localhost host — always require credentials.
-            logger.warn(
-                "credentials_missing",
-                message="No valid authorization token or API key provided.",
-                app_env=settings.app_env,
-                host=host
-            )
-            raise AuthenticationException("Authentication required. Please provide a Bearer JWT or API Key.")
+        logger.warn(
+            "credentials_missing",
+            message="No valid authorization token or API key provided.",
+            app_env=settings.app_env,
+            host=host
+        )
+        raise AuthenticationException("Authentication required. Please provide a Bearer JWT or API Key.")
 
     # Bind active Tenant ID to thread context variables dynamically
     tenant_id_var.set(user_principal.tenant_id)

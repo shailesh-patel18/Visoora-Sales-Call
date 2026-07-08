@@ -46,17 +46,16 @@ class TestM11AuthBypass:
     Requests through the ngrok host without credentials must return 401.
     """
 
-    def test_localhost_no_creds_dev_mode_returns_200(self):
+    def test_localhost_no_creds_dev_mode_returns_401(self):
         """
-        In development mode, unauthenticated requests from localhost host
-        header should succeed (dev bypass still active for localhost).
+        In Phase 2, we completely removed the localhost bypass.
+        Even in development, localhost requests without credentials must be rejected.
         """
-        # TestClient uses host=testserver by default; patch settings to dev mode
         with patch.object(settings, "app_env", "development"):
             # Simulate localhost host header
             response = client.get("/api/campaigns", headers={"Host": "localhost:8000"})
-            # Should reach the endpoint and return data (bypass active for localhost)
-            assert response.status_code == 200
+            # Should be blocked
+            assert response.status_code == 401
 
     def test_ngrok_domain_no_creds_always_returns_401(self):
         """

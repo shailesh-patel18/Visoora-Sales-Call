@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f9fafb; margin: 0; padding: 40px 0; color: #111827; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; }
+        .logo { font-size: 24px; font-weight: 700; margin-bottom: 24px; color: #111827; }
+        h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+        p { font-size: 16px; line-height: 1.5; color: #374151; margin-bottom: 24px; }
+        .button { display: inline-block; background-color: #111827; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 500; font-size: 14px; margin-bottom: 24px; }
+        .stats { display: flex; gap: 24px; margin-bottom: 24px; }
+        .stat-box { background: #f3f4f6; padding: 16px; border-radius: 8px; flex: 1; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: 700; color: #111827; }
+        .stat-label { font-size: 12px; color: #6b7280; text-transform: uppercase; font-weight: 600; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Visoora</div>
+        <h1>Mission Completed: {{ .MissionName }}</h1>
+        <p>Your AI agents have successfully concluded this mission. Here is a quick summary of the results.</p>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <div class="stat-value">{{ .EmailsSent }}</div>
+                <div class="stat-label">Sent</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{{ .OpenRate }}%</div>
+                <div class="stat-label">Open Rate</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-value">{{ .MeetingsBooked }}</div>
+                <div class="stat-label">Meetings</div>
+            </div>
+        </div>
+        
+        <p>The system has learned from the responses and updated your Business Brain. Check out the full ROI report to see insights and plan your next move.</p>
+        <a href="{{ .AppURL }}/report/{{ .MissionID }}" class="button" style="color: #ffffff;">View ROI Report</a>
+    </div>
+</body>
+</html>

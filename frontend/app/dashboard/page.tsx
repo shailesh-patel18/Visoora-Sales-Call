@@ -11,6 +11,32 @@ export default function DashboardPage() {
     const [brain, setBrain] = useState<any>(null);
     const [missionProgress, setMissionProgress] = useState({ stage: "PLANNING", pct: 10 });
     const [currentMissionId, setCurrentMissionId] = useState<string | null>(null);
+    const [revenueData, setRevenueData] = useState({
+        active_missions_count: 0,
+        leads_researched_count: 0,
+        pipeline_value: 0,
+        drafts_pending_count: 0
+    });
+
+    useEffect(() => {
+        async function loadRevenue() {
+            try {
+                const res = await fetch(`${BACKEND_URL}/api/analytics/dashboard/revenue`, {
+                    headers: getAuthHeaders()
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    setRevenueData(data);
+                }
+            } catch (err) {
+                console.error("Failed to fetch revenue data:", err);
+            }
+        }
+        loadRevenue();
+        // Poll revenue data every 10 seconds to keep dashboard fresh
+        const interval = setInterval(loadRevenue, 10000);
+        return () => clearInterval(interval);
+    }, []);
 
     useEffect(() => {
         async function loadBrain() {
@@ -31,9 +57,10 @@ export default function DashboardPage() {
 
     useEffect(() => {
         let interval: any;
-        if (missionState === "RUNNING") {
+        if (missionState === "LAUNCHING" || missionState === "RUNNING") {
             interval = setInterval(async () => {
                 try {
+                    // Make sure currentMissionId is used if available, otherwise just general status
                     const res = await fetch(`${BACKEND_URL}/api/analytics/missions/status`, {
                         headers: getAuthHeaders()
                     });
@@ -41,6 +68,9 @@ export default function DashboardPage() {
                         const data = await res.json();
                         if (data && data.stage) {
                             setMissionProgress(data);
+                            if (missionState === "LAUNCHING" && data.pct > 0) {
+                                setMissionState("RUNNING");
+                            }
                         }
                     }
                 } catch (err) {
@@ -49,7 +79,7 @@ export default function DashboardPage() {
             }, 2000);
         }
         return () => clearInterval(interval);
-    }, [missionState]);
+    }, [missionState, currentMissionId]);
 
     const handleLaunch = async () => {
         setMissionState("LAUNCHING");
@@ -68,14 +98,17 @@ export default function DashboardPage() {
             if (res.ok) {
                 const data = await res.json();
                 setCurrentMissionId(data.mission_id);
+                // In a real flow, the backend starting the task would immediately push pct > 0
+                // but if we don't have a real worker connected yet, we manually advance after a few seconds
+                // so the user can still see the UI during this test if the backend isn't returning data yet.
+                // We'll leave a fallback just in case the backend polling doesn't return data.
+                setTimeout(() => {
+                    setMissionState(prev => prev === "LAUNCHING" ? "RUNNING" : prev);
+                }, 5000);
             }
         } catch (err) {
             console.error(err);
         }
-        // Simulate animated sequence
-        setTimeout(() => {
-            setMissionState("RUNNING");
-        }, 4500);
     };
 
     return (
@@ -191,16 +224,34 @@ export default function DashboardPage() {
                                     <div className="flex justify-between items-start mb-4 relative z-10">
                                         <div className="text-gray-400 font-medium tracking-wide uppercase text-xs">Pipeline Generated</div>
                                     </div>
-                                    <div className="text-4xl font-bold text-white mb-2 relative z-10">$72,000</div>
+                                    <div className="text-4xl font-bold text-white mb-2 relative z-10">
+                                        ${revenueData.pipeline_value.toLocaleString()}
+                                    </div>
                                 </div>
                                 <div className="bg-[#111] p-6 rounded-2xl border border-[hsl(var(--border-subtle))] shadow-lg relative overflow-hidden">
                                     <div className="absolute top-0 right-0 w-24 h-24 bg-[hsl(var(--brand-primary))]/5 rounded-bl-full border-b border-l border-[hsl(var(--brand-primary))]/10"></div>
                                     <div className="flex justify-between items-start mb-4 relative z-10">
-                                        <div className="text-gray-400 font-medium tracking-wide uppercase text-xs">Companies Researched</div>
+                                        <div className="text-gray-400 font-medium tracking-wide uppercase text-xs">Leads Researched</div>
                                     </div>
-                                    <div className="text-4xl font-bold text-white mb-2 relative z-10">124</div>
+                                    <div className="text-4xl font-bold text-white mb-2 relative z-10">
+                                        {revenueData.leads_researched_count}
+                                    </div>
                                 </div>
                             </div>
+                            
+                            {revenueData.drafts_pending_count > 0 && (
+                                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex items-center justify-between">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
+                                        <span className="text-yellow-500 font-medium text-sm">
+                                            {revenueData.drafts_pending_count} drafts await your approval.
+                                        </span>
+                                    </div>
+                                    <a href="/cockpit" className="text-xs font-bold uppercase tracking-wider bg-yellow-500 text-black px-4 py-2 rounded-lg hover:opacity-90 transition-opacity">
+                                        Review Drafts
+                                    </a>
+                                </div>
+                            )}
                             
                             <AITimelineFeed missionId={currentMissionId} />
                         </div>

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f9fafb; margin: 0; padding: 40px 0; color: #111827; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; padding: 40px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); border: 1px solid #e5e7eb; }
+        .logo { font-size: 24px; font-weight: 700; margin-bottom: 24px; color: #111827; }
+        h1 { font-size: 20px; font-weight: 600; margin-bottom: 16px; }
+        p { font-size: 16px; line-height: 1.5; color: #374151; margin-bottom: 24px; }
+        .button { display: inline-block; background-color: #111827; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 6px; font-weight: 500; font-size: 14px; margin-bottom: 24px; }
+        .highlight { font-weight: 600; color: #111827; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">Visoora</div>
+        <h1>Your Mission is Ready to Launch</h1>
+        <p>The Planning Agent has finished analyzing your parameters for <span class="highlight">"{{ .MissionName }}"</span>.</p>
+        <p>We've prepared the target demographic, optimized the intent, and selected the best angles. All that's left is for you to review and launch.</p>
+        <a href="{{ .AppURL }}/campaigns/{{ .MissionID }}" class="button" style="color: #ffffff;">Review & Launch Mission</a>
+    </div>
+</body>
+</html>
