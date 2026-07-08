@@ -103,6 +103,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         email,
         password: password || "Visoora@2024",
         options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
             full_name: name,
             role: "admin",
