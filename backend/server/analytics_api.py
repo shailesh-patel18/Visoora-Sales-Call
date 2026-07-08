@@ -894,6 +894,7 @@ async def get_missions_timeline(user: UserPrincipal = Depends(get_current_user))
 class LaunchMissionPayload(BaseModel):
     mission_name: str
     goal: str
+    audience: Optional[str] = None
 
 @analytics_router.post("/missions/launch")
 async def launch_mission(
@@ -942,7 +943,8 @@ async def launch_mission(
             payload={
                 "tenant_id": tenant_uuid, 
                 "mission_name": payload.mission_name,
-                "goal": payload.goal
+                "goal": payload.goal,
+                "audience": payload.audience
             }
         )
         logger.info("explicit_mission_launched", tenant=tenant_id, mission_name=payload.mission_name)

@@ -42,6 +42,10 @@ export default function MissionsPage() {
             View active and completed autonomous AI missions.
           </p>
         </div>
+        <Link href="/campaigns/new" className="hidden md:flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-[#00F0FF] to-[#10B981] text-black font-bold rounded-xl hover:opacity-90 transition-opacity shadow-[0_0_20px_rgba(0,240,255,0.2)]">
+          <Play className="w-4 h-4 fill-black" />
+          Create Mission
+        </Link>
       </div>
 
       <div className="space-y-4">
@@ -57,10 +61,15 @@ export default function MissionsPage() {
                   <Target className="w-8 h-8 text-gray-500" />
                 </div>
                 <h3 className="text-xl font-semibold text-white">No Missions Yet</h3>
-                <p className="text-gray-400 mt-2">Go to the Command Center to launch your first mission.</p>
-                <Link href="/dashboard" className="inline-block mt-6 px-6 py-2 bg-white text-black font-semibold rounded-lg hover:bg-gray-200">
-                   Go to Command Center
-                </Link>
+                <p className="text-gray-400 mt-2">Create your first custom AI mission to start researching prospects.</p>
+                <div className="flex gap-4 justify-center mt-6">
+                    <Link href="/campaigns/new" className="inline-block px-6 py-2 bg-[#00F0FF] text-black font-bold rounded-lg hover:bg-white transition-colors">
+                      Create Mission
+                    </Link>
+                    <Link href="/dashboard" className="inline-block px-6 py-2 bg-white/10 text-white font-semibold rounded-lg hover:bg-white/20 transition-colors">
+                      Go to Command Center
+                    </Link>
+                </div>
              </motion.div>
           ) : (
             missions.map((mission) => (
