@@ -98,16 +98,16 @@ export default function DashboardPage() {
             if (res.ok) {
                 const data = await res.json();
                 setCurrentMissionId(data.mission_id);
-                // In a real flow, the backend starting the task would immediately push pct > 0
-                // but if we don't have a real worker connected yet, we manually advance after a few seconds
-                // so the user can still see the UI during this test if the backend isn't returning data yet.
-                // We'll leave a fallback just in case the backend polling doesn't return data.
-                setTimeout(() => {
-                    setMissionState(prev => prev === "LAUNCHING" ? "RUNNING" : prev);
-                }, 5000);
+            } else {
+                console.warn("Backend returned error, falling back to local demo state.");
             }
         } catch (err) {
-            console.error(err);
+            console.warn("Backend fetch failed, falling back to local demo state.", err);
+        } finally {
+            // Always transition after animation completes so the UI doesn't get permanently stuck
+            setTimeout(() => {
+                setMissionState(prev => prev === "LAUNCHING" ? "RUNNING" : prev);
+            }, 5000);
         }
     };
 
