@@ -4,7 +4,7 @@ import datetime
 from typing import List, Dict, Any, Optional
 from html import escape
 from urllib.parse import urlencode, urlparse
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Response, Depends, Form
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Response, Depends, Form, Query
 import structlog
 from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
 from security.config import settings
