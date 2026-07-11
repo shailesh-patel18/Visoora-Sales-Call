@@ -40,7 +40,7 @@ async def analyze_website(payload: AnalyzeRequest, request: Request):
     await enforce_layered_rate_limits(request, domain=domain, tenant_id="anonymous")
 
     # 1. Intelligent Caching: Check if we already have a recent business brain for this domain
-    from server.storage_manager import get_scoped_supabase_admin_client, supabase_admin_client
+    from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
     import datetime
     
     if supabase_admin_client:
@@ -142,7 +142,7 @@ async def get_report(result_id: str):
     """
     Fetches a cached report (Business Brain) by ID.
     """
-    from server.storage_manager import get_scoped_supabase_admin_client, supabase_admin_client
+    from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
     if not supabase_admin_client:
         raise HTTPException(status_code=500, detail="Database not configured")
         

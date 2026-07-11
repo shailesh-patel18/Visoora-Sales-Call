@@ -6,7 +6,7 @@ from html import escape
 from urllib.parse import urlencode, urlparse
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Response, Depends, Form
 import structlog
-from server.storage_manager import get_scoped_supabase_admin_client, supabase_admin_client
+from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
 from security.config import settings
 from security.twilio_auth import verify_twilio_signature
 from services.calendar import calendar_service
