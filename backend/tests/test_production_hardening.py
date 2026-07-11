@@ -166,7 +166,7 @@ class TestM12TenantIsolation:
         mock_supabase.storage.from_.return_value.get_public_url.return_value = "https://supabase.example/rec.wav"
         mock_supabase.table.return_value.insert.return_value.execute.return_value = MagicMock()
 
-        with patch("server.storage_manager.supabase_client", mock_supabase):
+        with patch("server.storage_manager.supabase_admin_client", mock_supabase):
             await tracker.upload_recording(
                 stream_sid=stream_sid,
                 phone_number="+15550000000",
@@ -205,7 +205,7 @@ class TestM12TenantIsolation:
         mock_supabase.storage.from_.side_effect = capture_from
         mock_supabase.table.return_value.insert.return_value.execute.return_value = MagicMock()
 
-        with patch("server.storage_manager.supabase_client", mock_supabase):
+        with patch("server.storage_manager.supabase_admin_client", mock_supabase):
             await tracker.upload_recording(
                 stream_sid=stream_sid,
                 phone_number="+15550000000",
@@ -259,7 +259,7 @@ class TestM13CsvOfflinePersistence:
         # The supabase_client is imported lazily inside background_import_task
         # via `from server.storage_manager import supabase_admin_client as supabase_client`
         # Patch it at the source module so the lazy import sees None
-        with patch("server.storage_manager.supabase_client", None):
+        with patch("server.storage_manager.supabase_admin_client", None):
             await background_import_task(job_id, payload)
 
         # Verify local JSON file was created and contains contacts
@@ -303,7 +303,7 @@ class TestM13CsvOfflinePersistence:
         job_id = "job_test_msg"
         IMPORT_JOBS[job_id] = {"progress": 0, "status": "init", "completed": False}
 
-        with patch("server.storage_manager.supabase_client", None):
+        with patch("server.storage_manager.supabase_admin_client", None):
             await background_import_task(job_id, payload)
 
         final_status = IMPORT_JOBS.get(job_id, {}).get("status", "")
@@ -348,7 +348,7 @@ class TestM21AnalyticsRouter:
         fallback (M2.1b), not return 500.
         """
         mock_verify.return_value = mock_jwt_payload(role="admin", tenant_id="local_tenant")
-        with patch("server.analytics_api.supabase_client", None):
+        with patch("server.analytics_api.supabase_admin_client", None):
             response = client.get(
                 "/api/analytics/dashboard",
                 headers={"Authorization": "Bearer valid_jwt_token"}

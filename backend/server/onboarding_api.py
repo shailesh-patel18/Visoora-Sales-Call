@@ -482,7 +482,7 @@ async def background_import_task(job_id: str, payload: ImportPayload, correlatio
     await update_status(10, "Establishing database connection...", 0, 0, 0, [])
     
     from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
-    if not get_scoped_supabase_client(user.raw_token):
+    if not supabase_admin_client:
         # Supabase is offline. Persist contacts to a local JSON file so data is never lost.
         local_contacts_path = f"recordings/local_contacts_{tenant_id}.json"
         logger.info(
@@ -597,17 +597,17 @@ async def background_import_task(job_id: str, payload: ImportPayload, correlatio
             
             try:
                 # Find existing to check duplicate/upsert
-                existing = get_scoped_supabase_client(user.raw_token).table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
+                existing = supabase_admin_client.table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
                 if existing.data:
                     c_id = existing.data[0]["id"]
-                    get_scoped_supabase_client(user.raw_token).table("contacts").update(contact_payload).eq("id", c_id).eq("tenant_id", tenant_id).execute()
+                    supabase_admin_client.table("contacts").update(contact_payload).eq("id", c_id).eq("tenant_id", tenant_id).execute()
                     details.append({"row": i, "name": name, "phone": phone, "outcome": "skipped", "reason": "Duplicate prospect (updated existing record)"})
                     skipped_count += 1
                     imported_contact_ids.append(c_id)
                 else:
                     c_id = str(uuid.uuid4())
                     contact_payload["id"] = c_id
-                    get_scoped_supabase_client(user.raw_token).table("contacts").insert(contact_payload).execute()
+                    supabase_admin_client.table("contacts").insert(contact_payload).execute()
                     details.append({"row": i, "name": name, "phone": phone, "outcome": "imported", "reason": ""})
                     imported_count += 1
                     imported_contact_ids.append(c_id)
