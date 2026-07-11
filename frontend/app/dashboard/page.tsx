@@ -23,12 +23,17 @@ export default function DashboardPage() {
     useEffect(() => {
         async function loadRevenue() {
             try {
+                const headers = getAuthHeaders();
+                if (!headers.Authorization) return;
+                
                 const res = await fetch(`${BACKEND_URL}/api/analytics/dashboard/revenue`, {
-                    headers: getAuthHeaders()
+                    headers
                 });
                 if (res.ok) {
                     const data = await res.json();
                     setRevenueData(data);
+                } else if (res.status === 401) {
+                    console.warn("Unauthorized, stopping revenue polling");
                 }
             } catch (err) {
                 console.error("Failed to fetch revenue data:", err);
@@ -62,9 +67,14 @@ export default function DashboardPage() {
         if (missionState === "LAUNCHING" || missionState === "RUNNING") {
             interval = setInterval(async () => {
                 try {
+                    const headers = getAuthHeaders();
+                    if (!headers.Authorization) {
+                        clearInterval(interval);
+                        return;
+                    }
                     // Make sure currentMissionId is used if available, otherwise just general status
                     const res = await fetch(`${BACKEND_URL}/api/analytics/missions/status`, {
-                        headers: getAuthHeaders()
+                        headers
                     });
                     if (res.ok) {
                         const data = await res.json();
@@ -74,6 +84,8 @@ export default function DashboardPage() {
                                 setMissionState("RUNNING");
                             }
                         }
+                    } else if (res.status === 401) {
+                        clearInterval(interval);
                     }
                 } catch (err) {
                     console.error("Failed to fetch mission status:", err);

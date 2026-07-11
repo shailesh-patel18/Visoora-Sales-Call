@@ -13,16 +13,21 @@ interface User {
 
 export const getAuthHeaders = (): Record<string, string> => {
   let token = "";
+  let tenantId = "";
   if (typeof window !== "undefined") {
     const key = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
     if (key) {
       try {
         const session = JSON.parse(localStorage.getItem(key) || "{}");
         token = session.access_token || "";
+        tenantId = session.user?.user_metadata?.tenant_id || "";
       } catch (e) {}
     }
   }
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? { 
+    Authorization: `Bearer ${token}`,
+    "X-Tenant-ID": tenantId || "anonymous"
+  } : {};
 };
 
 interface AuthState {
