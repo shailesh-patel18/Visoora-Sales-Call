@@ -82,8 +82,14 @@ export function Sidebar() {
         if (res.ok) { const d = await res.json(); setInboxCount(d.count ?? 0); }
       } catch { /* silent */ }
     };
-    fetchCount();
-    const interval = setInterval(fetchCount, 45000);
+    if (useAuthStore.getState().isAuthenticated) {
+        fetchCount();
+    }
+    const interval = setInterval(() => {
+        if (useAuthStore.getState().isAuthenticated) {
+            fetchCount();
+        }
+    }, 45000);
     return () => clearInterval(interval);
   }, []);
 

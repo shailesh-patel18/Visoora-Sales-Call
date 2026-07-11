@@ -8,7 +8,7 @@ import {
   GitCompare, Briefcase, Smile, Zap, CheckCheck
 } from "lucide-react";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 
 interface Artifact {
   id: string;
@@ -78,6 +78,7 @@ function DiffView({ original, current }: { original: string; current: string }) 
 }
 
 export default function InboxPage() {
+  const { isAuthenticated } = useAuthStore();
   const [pending, setPending] = useState<Artifact[]>([]);
   const [queued, setQueued] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,6 +99,7 @@ export default function InboxPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchArtifacts = useCallback(async () => {
+    if (!isAuthenticated) return;
     try {
       setFetchError(false);
       const res = await fetch(`${BACKEND_URL}/api/analytics/inbox/artifacts`, { headers: getAuthHeaders() });
@@ -116,8 +118,12 @@ export default function InboxPage() {
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchArtifacts(); }, [fetchArtifacts]);
-  useEffect(() => { const t = setInterval(fetchArtifacts, 12000); return () => clearInterval(t); }, [fetchArtifacts]);
+  useEffect(() => { if (isAuthenticated) fetchArtifacts(); }, [fetchArtifacts, isAuthenticated]);
+  useEffect(() => { 
+    if (!isAuthenticated) return;
+    const t = setInterval(fetchArtifacts, 12000); 
+    return () => clearInterval(t); 
+  }, [fetchArtifacts, isAuthenticated]);
 
   const selected = pending.find(a => a.id === selectedId) || null;
 

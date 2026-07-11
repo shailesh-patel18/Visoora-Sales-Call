@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 import { motion } from "framer-motion";
 import { AITimelineFeed } from "../components/AITimelineFeed";
 import { WorkspaceHealth } from "../components/WorkspaceHealth";
@@ -9,6 +9,7 @@ import { DashboardChatbot } from "../components/DashboardChatbot";
 import Link from "next/link";
 
 export default function DashboardPage() {
+    const { isAuthenticated } = useAuthStore();
     const [missionState, setMissionState] = useState("READY_TO_LAUNCH");
     const [brain, setBrain] = useState<any>(null);
     const [missionProgress, setMissionProgress] = useState({ stage: "PLANNING", pct: 10 });
@@ -39,11 +40,15 @@ export default function DashboardPage() {
                 console.error("Failed to fetch revenue data:", err);
             }
         }
-        loadRevenue();
+        if (isAuthenticated) {
+            loadRevenue();
+        }
         // Poll revenue data every 10 seconds to keep dashboard fresh
-        const interval = setInterval(loadRevenue, 10000);
+        const interval = setInterval(() => {
+            if (isAuthenticated) loadRevenue();
+        }, 10000);
         return () => clearInterval(interval);
-    }, []);
+    }, [isAuthenticated]);
 
     useEffect(() => {
         async function loadBrain() {
@@ -59,8 +64,10 @@ export default function DashboardPage() {
                 console.error("Failed to fetch brain data:", err);
             }
         }
-        loadBrain();
-    }, []);
+        if (isAuthenticated) {
+            loadBrain();
+        }
+    }, [isAuthenticated]);
 
     useEffect(() => {
         let interval: any;

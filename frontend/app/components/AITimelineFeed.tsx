@@ -4,18 +4,21 @@ import React, { useEffect, useState } from "react";
 import { Bot, Mail, Target, Phone, BrainCircuit, Activity } from "lucide-react";
 import { motion } from "framer-motion";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 
 export function AITimelineFeed({ missionId }: { missionId?: string | null }) {
+  const { isAuthenticated } = useAuthStore();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchTimeline();
+    if (isAuthenticated) fetchTimeline();
     const pollRate = missionId ? 3000 : 30000;
-    const interval = setInterval(fetchTimeline, pollRate);
+    const interval = setInterval(() => {
+      if (isAuthenticated) fetchTimeline();
+    }, pollRate);
     return () => clearInterval(interval);
-  }, [missionId]);
+  }, [missionId, isAuthenticated]);
 
   const fetchTimeline = async () => {
     try {

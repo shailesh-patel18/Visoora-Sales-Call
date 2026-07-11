@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { useCRMStore, type Contact } from "../store";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 
 // ====================================================
 // MOCK DATA
@@ -92,14 +92,15 @@ const countries = [
 ];
 
 export default function ContactsPage() {
-  const { contacts, setContacts, addContact, removeContact } = useCRMStore();
+  const { contacts, setContacts, addContact, removeContact, updateContact } = useCRMStore();
+  const { isAuthenticated } = useAuthStore();
+  const [mounted, setMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<"full_name" | "lead_score" | "created_at">("lead_score");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [dialing, setDialing] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [isLoadingContacts, setIsLoadingContacts] = useState(true);
   const [fetchError, setFetchError] = useState(false);
 
@@ -206,7 +207,10 @@ export default function ContactsPage() {
         try {
           const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
             method: "POST",
-            headers: getAuthHeaders(),
+            headers: {
+              ...getAuthHeaders(),
+              "Content-Type": "application/json"
+            },
             body: JSON.stringify(payload)
           });
           if (res.ok) {
@@ -247,8 +251,10 @@ export default function ContactsPage() {
 
   useEffect(() => {
     setMounted(true);
-    fetchContacts();
-  }, [setContacts]);
+    if (isAuthenticated) {
+      fetchContacts();
+    }
+  }, [setContacts, isAuthenticated]);
 
   const filtered = useMemo(() => {
     let list = contacts.filter(

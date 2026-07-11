@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useCRMStore, type Deal, type PipelineStage } from "../store";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 
 // ====================================================
 // MOCK DATA FALLBACK
@@ -204,6 +204,7 @@ function KanbanColumn({
 // ====================================================
 export default function PipelinePage() {
   const { stages, setStages, moveDeal, addDeal, removeDeal, contacts, setContacts } = useCRMStore();
+  const { isAuthenticated } = useAuthStore();
   const [mounted, setMounted] = useState(false);
   const [dragInfo, setDragInfo] = useState<{ dealId: string; fromStageId: string } | null>(null);
   const [isLoadingPipeline, setIsLoadingPipeline] = useState(true);
@@ -281,8 +282,10 @@ export default function PipelinePage() {
 
   useEffect(() => {
     setMounted(true);
-    fetchContactsAndPipeline();
-  }, [setStages, setContacts]);
+    if (isAuthenticated) {
+      fetchContactsAndPipeline();
+    }
+  }, [setStages, setContacts, isAuthenticated]);
 
   const handleDragStart = useCallback(
     (e: React.DragEvent, dealId: string, stageId: string) => {

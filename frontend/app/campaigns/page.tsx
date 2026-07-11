@@ -5,15 +5,18 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Target, Search, ArrowRight, Play, CheckCircle2, Clock } from "lucide-react";
 import Link from "next/link";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 
 export default function MissionsPage() {
+  const { isAuthenticated } = useAuthStore();
   const [missions, setMissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchMissions();
-  }, []);
+    if (isAuthenticated) {
+      fetchMissions();
+    }
+  }, [isAuthenticated]);
 
   const fetchMissions = async () => {
     try {

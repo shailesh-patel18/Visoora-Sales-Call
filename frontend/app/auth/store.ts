@@ -12,27 +12,20 @@ interface User {
 }
 
 export const getAuthHeaders = (): Record<string, string> => {
-  let token = "";
-  let tenantId = "";
-  if (typeof window !== "undefined") {
-    const key = Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token"));
-    if (key) {
-      try {
-        const session = JSON.parse(localStorage.getItem(key) || "{}");
-        token = session.access_token || "";
-        tenantId = session.user?.user_metadata?.tenant_id || "";
-      } catch (e) {}
-    }
+  const state = useAuthStore.getState();
+  if (state.token) {
+    return {
+      Authorization: `Bearer ${state.token}`,
+      "X-Tenant-ID": state.user?.tenant_id || "anonymous"
+    };
   }
-  return token ? { 
-    Authorization: `Bearer ${token}`,
-    "X-Tenant-ID": tenantId || "anonymous"
-  } : {};
+  return {};
 };
 
 interface AuthState {
   isAuthenticated: boolean;
   user: User | null;
+  token: string | null;
   login: (email: string, password?: string) => Promise<boolean>;
   logout: () => Promise<void>;
   signup: (name: string, email: string, password?: string) => Promise<boolean>;
@@ -42,12 +35,13 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   user: null,
+  token: null,
 
   checkSession: async () => {
     const supabase = createClient();
     const { data: { session } } = await supabase.auth.getSession();
     
-    if (session?.user) {
+    if (session?.user && session.access_token) {
       const u: User = {
         id: session.user.id,
         email: session.user.email || "",
@@ -55,9 +49,9 @@ export const useAuthStore = create<AuthState>((set) => ({
         role: session.user.user_metadata?.role || "admin",
         tenant_id: session.user.user_metadata?.tenant_id || "",
       };
-      set({ isAuthenticated: true, user: u });
+      set({ isAuthenticated: true, user: u, token: session.access_token });
     } else {
-      set({ isAuthenticated: false, user: null });
+      set({ isAuthenticated: false, user: null, token: null });
     }
   },
 
@@ -82,7 +76,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         tenant_id: data.user.user_metadata?.tenant_id || "",
       };
 
-      set({ isAuthenticated: true, user: u });
+      set({ isAuthenticated: true, user: u, token: data.session?.access_token || null });
       return true;
     } catch (err) {
       console.error("AuthStore login exception:", err);
@@ -97,7 +91,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (err) {
       console.error("AuthStore logout error:", err);
     } finally {
-      set({ isAuthenticated: false, user: null });
+      set({ isAuthenticated: false, user: null, token: null });
     }
   },
 
