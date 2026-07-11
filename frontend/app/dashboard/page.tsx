@@ -213,7 +213,7 @@ export default function DashboardPage() {
                 <div className="lg:col-span-1 space-y-8">
                     {/* Business Brain Status */}
                     <div className="bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl p-6">
-                        <h3 className="text-lg font-bold text-white mb-4">Business Brain</h3>
+                        <h3 className="text-lg font-bold text-white mb-4">Business Brain & ICP</h3>
                         <div className="space-y-4">
                             <div className="flex justify-between items-center text-sm">
                                 <span className="text-gray-400">Industry</span>
@@ -224,6 +224,11 @@ export default function DashboardPage() {
                                 <span className="text-[#10B981] font-medium">Trained</span>
                             </div>
                         </div>
+                        <p className="text-xs text-gray-500 mt-6 leading-relaxed border-t border-[hsl(var(--border-subtle))] pt-4">
+                            Your Ideal Customer Profile (ICP) was generated during onboarding. It lives inside your tenant's secure Vector Knowledge Base.
+                            <br/><br/>
+                            To review or interact with your ICP, click the Chat button in the bottom right corner to talk to the Business Brain.
+                        </p>
                     </div>
                     
                     <WorkspaceHealth />

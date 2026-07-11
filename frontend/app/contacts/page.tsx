@@ -16,6 +16,7 @@ import {
   Building2,
   Clock,
   X,
+  Upload,
 } from "lucide-react";
 import { useCRMStore, type Contact } from "../store";
 import { BACKEND_URL } from "../config";
@@ -163,6 +164,66 @@ export default function ContactsPage() {
     setShowAddModal(false);
   };
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const text = event.target?.result as string;
+      const rows = text.split("\n").filter(row => row.trim() !== "");
+      // Assume CSV format: Name,Company,Phone,Email,Lead Score
+      // Skip header if it exists
+      const startIndex = rows[0].toLowerCase().includes("name") ? 1 : 0;
+      
+      let successCount = 0;
+      for (let i = startIndex; i < rows.length; i++) {
+        const row = rows[i];
+        // simple CSV parsing handling quotes (naive approach)
+        const cols = row.split(",").map(c => c.replace(/^"|"$/g, "").trim());
+        if (cols.length < 3) continue;
+
+        const [name, company, phone, email, scoreStr] = cols;
+        if (!name || !phone) continue;
+
+        // format phone naive
+        let phoneFormatted = phone;
+        if (!phoneFormatted.startsWith("+")) {
+          phoneFormatted = `+1${phoneFormatted.replace(/\D/g, "")}`;
+        }
+
+        const payload = {
+          phone_e164: phoneFormatted,
+          full_name: name,
+          company_name: company || "Independent",
+          email: email || undefined,
+          lead_score: parseInt(scoreStr) || 50,
+          lead_source: "inbound",
+          tags: ["csv_upload"],
+          custom_fields: {}
+        };
+
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
+            method: "POST",
+            headers: getAuthHeaders(),
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            const savedContact = await res.json();
+            addContact(savedContact);
+            successCount++;
+          }
+        } catch (err) {
+          console.warn("Failed to upload contact row:", err);
+        }
+      }
+      alert(`Successfully uploaded ${successCount} contacts.`);
+    };
+    reader.readAsText(file);
+    e.target.value = ""; // reset input
+  };
+
   const fetchContacts = async () => {
     setIsLoadingContacts(true);
     setFetchError(false);
@@ -303,6 +364,10 @@ export default function ContactsPage() {
               </button>
             </>
           )}
+          <label className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold cursor-pointer border transition-colors" style={{ borderColor: "hsl(var(--border-default))", color: "hsl(var(--text-secondary))", background: "hsl(var(--surface-2))" }}>
+            <Upload className="w-3.5 h-3.5" /> Upload CSV
+            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+          </label>
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white"

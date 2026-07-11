@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useRef } from "react";
 import { BACKEND_URL } from "../config";
-import { getAuthHeaders } from "../auth/store";
+import { getAuthHeaders, useAuthStore } from "../auth/store";
 import { motion, AnimatePresence } from "framer-motion";
 
 interface Message {
@@ -39,11 +39,13 @@ export function DashboardChatbot() {
     setIsLoading(true);
 
     try {
+      const user = useAuthStore.getState().user;
       const res = await fetch(`${BACKEND_URL}/api/v1/sales-employee/agents/default_agent/chat`, {
         method: "POST",
         headers: {
           ...getAuthHeaders(),
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
+          "X-Tenant-ID": user?.tenant_id || "anonymous"
         },
         body: JSON.stringify({
           message: userMsg,
