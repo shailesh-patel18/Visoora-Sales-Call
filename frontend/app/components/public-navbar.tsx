@@ -118,7 +118,7 @@ export function PublicNavbar() {
 
       {/* Mobile Drawer Overlay */}
       {isOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 mx-4 mt-2 p-6 glass rounded-2xl shadow-2xl flex flex-col gap-5 border border-zinc-800/80 animate-in fade-in slide-in-from-top-4 duration-200">
+        <div className="md:hidden absolute top-full left-0 right-0 mx-4 mt-2 p-6 bg-zinc-950 rounded-2xl shadow-2xl flex flex-col gap-5 border border-zinc-800/80 animate-in fade-in slide-in-from-top-4 duration-200">
           <Link 
             href="/" 
             onClick={() => setIsOpen(false)}
