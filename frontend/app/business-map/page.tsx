@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { BACKEND_URL } from "../config";
+import { getAuthHeaders } from "../auth/store";
 import { 
   BrainCircuit, GitCommit, GitPullRequest, Search, CheckCircle2, 
   Target, Users, Zap, ShieldAlert, FileText, ChevronDown, Plus 
@@ -9,6 +11,24 @@ import { motion, AnimatePresence } from "framer-motion";
 
 export default function BusinessBrainPage() {
   const [activeTab, setActiveTab] = useState<"knowledge" | "memory">("knowledge");
+  const [brainData, setBrainData] = useState<any>(null);
+
+  useEffect(() => {
+    async function loadBrain() {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/analytics/business-map`, {
+          headers: getAuthHeaders()
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setBrainData(data.agent_config);
+        }
+      } catch (err) {
+        console.error("Failed to fetch brain data:", err);
+      }
+    }
+    loadBrain();
+  }, []);
 
   return (
     <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
@@ -110,20 +130,29 @@ export default function BusinessBrainPage() {
                 </h3>
                 
                 <div className="space-y-4">
-                  <div className="p-4 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))]">
-                    <h4 className="font-semibold text-white">1. Healthcare Tech Startups</h4>
-                    <p className="text-xs text-gray-400 mt-1 mb-3">Series A+ • 50-200 employees</p>
-                    <div className="space-y-2">
-                      <div className="text-sm">
-                        <span className="text-gray-500 block text-xs uppercase">Pain Point</span>
-                        <span className="text-gray-300">Long compliance cycles blocking rapid AI deployment.</span>
+                  {brainData?.icp_segments && brainData.icp_segments.length > 0 ? (
+                    brainData.icp_segments.map((icp: any, idx: number) => (
+                      <div key={idx} className="p-4 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))]">
+                        <h4 className="font-semibold text-white">{idx + 1}. {icp.segment || "Unnamed ICP Segment"}</h4>
+                        <div className="flex items-center gap-2 mt-1 mb-3">
+                          <span className="text-xs text-gray-400">Confidence: {icp.confidence || 0}%</span>
+                          <div className="w-16 h-1 bg-[#333] rounded-full overflow-hidden">
+                             <div className="h-full bg-[#00F0FF]" style={{ width: `${icp.confidence || 0}%` }}></div>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <div className="text-sm">
+                            <span className="text-gray-500 block text-xs uppercase">Rationale</span>
+                            <span className="text-gray-300">{icp.rationale || "No rationale provided."}</span>
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-sm">
-                        <span className="text-gray-500 block text-xs uppercase">Buyer Persona</span>
-                        <span className="text-gray-300">CTO / VP Engineering</span>
-                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))]">
+                      <p className="text-xs text-gray-400 mb-3">No ICP Segments generated yet. They will be generated based on your Business Brain.</p>
                     </div>
-                  </div>
+                  )}
 
                   <div className="p-4 bg-white/5 rounded-xl border border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:bg-white/10 transition-colors">
                     <span className="text-sm font-semibold text-gray-400 flex items-center gap-2"><Plus className="w-4 h-4"/> Add New ICP</span>

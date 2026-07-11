@@ -209,8 +209,8 @@ async def chat_with_agent(agent_id: str, payload: dict, tenant_id: str = Depends
     persona = context.get("persona_config", {})
     knowledge = context.get("knowledge_context", "No explicit knowledge retrieved.")
     
-    # 2. Construct Prompt
-    system_prompt = f"""You are a helpful AI assistant for the Visoora dashboard.
+    # 2. Construct Context
+    system_context = f"""
 Your persona configuration is: {json.dumps(persona)}
 You have access to the following knowledge base regarding the user's business/tenant:
 ---
@@ -225,13 +225,18 @@ Answer the user's questions based primarily on the knowledge provided. If you do
         content = msg.get("content", "")
         history_text += f"{role}: {content}\n"
         
-    user_prompt = f"{history_text}\nUser: {message}\nAssistant:"
+    user_prompt = f"{system_context}\n\n{history_text}\nUser: {message}\nAssistant:"
     
-    from ai_platform.providers.llm_provider import get_llm_provider, GenerationConfig
-    provider = get_llm_provider()
+    from ai_platform.agents.base_agent import BaseAgent
+    agent = BaseAgent(tenant_id=tenant_id)
     
     try:
-        reply = await provider.generate_text(system_prompt, user_prompt, GenerationConfig(temperature=0.6, max_tokens=1000))
+        reply = await agent.execute_task(
+            task_name="dashboard_chat",
+            prompt_id="dashboard_chatbot_v1",
+            context=user_prompt,
+            max_tokens=1000
+        )
         return {"reply": reply}
     except Exception as exc:
         logger.error("chatbot_generation_failed", error=str(exc))

@@ -20,6 +20,14 @@ class PromptRegistry:
             system_instruction="You are a B2B SaaS Growth Strategist. Output valid JSON only."
         )
 
+        self._prompts["dashboard_chatbot_v1"] = PromptSchema(
+            id="dashboard_chatbot_v1",
+            version=1,
+            description="General purpose chatbot for the Visoora dashboard using the Business Brain.",
+            supported_capabilities=[Capability.FAST, Capability.REASONING],
+            system_instruction="You are Visoora Brain, a helpful AI assistant and Personal LLM for the Visoora dashboard. Answer questions based on the user's business context. Be concise and professional."
+        )
+
     def get_prompt(self, prompt_id: str) -> Optional[PromptSchema]:
         return self._prompts.get(prompt_id)
 

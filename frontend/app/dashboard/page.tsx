@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { AITimelineFeed } from "../components/AITimelineFeed";
 import { WorkspaceHealth } from "../components/WorkspaceHealth";
 import { DashboardChatbot } from "../components/DashboardChatbot";
+import Link from "next/link";
 
 export default function DashboardPage() {
     const [missionState, setMissionState] = useState("READY_TO_LAUNCH");
@@ -159,18 +160,23 @@ export default function DashboardPage() {
                                 <h2 className="text-xl font-bold text-white">Recommended Mission</h2>
                                 <span className="text-xs font-bold uppercase tracking-wider text-[#00F0FF] bg-[#00F0FF]/10 px-3 py-1 rounded-full">Ready</span>
                             </div>
-                            <p className="text-gray-400 mb-6">We identified an optimal target audience based on your Business Brain.</p>
+                            <p className="text-gray-400 mb-4 text-sm leading-relaxed">You have no active prospects. Upload a CSV of leads for Visoora to research, score against your ICP, and begin outreach.</p>
                             
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6 p-4 bg-white/5 rounded-xl border border-white/10">
-                                <div><span className="text-xs text-gray-500 block">Prospects</span><span className="font-bold text-white">321</span></div>
-                                <div><span className="text-xs text-gray-500 block">Est. Meetings</span><span className="font-bold text-[#10B981]">5</span></div>
-                                <div><span className="text-xs text-gray-500 block">Est. Pipeline</span><span className="font-bold text-white">$68k</span></div>
-                                <div><span className="text-xs text-gray-500 block">Confidence</span><span className="font-bold text-white">91%</span></div>
+                            <div className="bg-[#222] border border-[#333] p-4 rounded-xl flex items-center justify-between mb-6">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-400"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                                    </div>
+                                    <div>
+                                        <h4 className="text-white font-semibold text-sm">Execution Engine</h4>
+                                        <p className="text-xs text-gray-400">Visoora does not buy leads. You provide the data.</p>
+                                    </div>
+                                </div>
                             </div>
                             
-                            <button onClick={handleLaunch} className="w-full py-3 bg-gradient-to-r from-[hsl(var(--brand-primary))] to-[hsl(var(--brand-accent))] text-black font-bold rounded-xl hover:opacity-90 transition-opacity">
-                                Launch Mission
-                            </button>
+                            <Link href="/contacts" className="w-full py-3 bg-white/5 border border-white/10 text-white font-bold rounded-xl hover:bg-white/10 transition-colors flex items-center justify-center">
+                                Upload Prospects
+                            </Link>
                         </div>
                     ) : (
                         <div className="bg-[#111] border border-[#00F0FF]/30 rounded-2xl p-6 relative overflow-hidden shadow-[0_0_40px_rgba(0,240,255,0.1)]">
