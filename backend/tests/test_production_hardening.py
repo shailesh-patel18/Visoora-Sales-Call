@@ -257,7 +257,7 @@ class TestM13CsvOfflinePersistence:
         IMPORT_JOBS[job_id] = {"progress": 0, "status": "init", "completed": False}
 
         # The supabase_client is imported lazily inside background_import_task
-        # via `from server.storage_manager import supabase_client`
+        # via `from server.storage_manager import supabase_admin_client as supabase_client`
         # Patch it at the source module so the lazy import sees None
         with patch("server.storage_manager.supabase_client", None):
             await background_import_task(job_id, payload)

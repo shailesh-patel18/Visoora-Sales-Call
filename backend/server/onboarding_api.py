@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 import structlog
 logger = structlog.get_logger("visoora_onboarding")
 
-from security.rbac import get_current_user
+from security.rbac import get_current_user, UserPrincipal
 
 onboarding_router = APIRouter(prefix="/api", tags=["Onboarding"], dependencies=[Depends(get_current_user)])
 
@@ -378,15 +378,15 @@ async def provision_phone_number(payload: ProvisionPayload):
             logger.error("twilio_subaccount_error", error=str(e))
             raise HTTPException(status_code=500, detail="Failed to provision Twilio subaccount")
 
-    from server.storage_manager import supabase_client
-    if supabase_client:
+    from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
+    if get_scoped_supabase_client(user.raw_token):
         try:
             # 1. Create Storage Bucket
             # Note: storage.create_bucket might not be directly available in the python client, 
             # but we can try to call it or simulate it via raw RPC if needed.
             # We'll use the standard supabase syntax for bucket creation if supported.
             try:
-                supabase_client.storage.create_bucket(bucket_name, {"public": False})
+                get_scoped_supabase_client(user.raw_token).storage.create_bucket(bucket_name, {"public": False})
                 logger.info("supabase_bucket_created", bucket_name=bucket_name)
             except Exception as e:
                 logger.warn("supabase_bucket_creation_failed_or_exists", error=str(e))
@@ -399,7 +399,7 @@ async def provision_phone_number(payload: ProvisionPayload):
                 "twilio_subaccount_sid": subaccount_sid,
                 "storage_bucket_name": bucket_name
             }
-            supabase_client.table("tenants").upsert(tenant_payload).execute()
+            get_scoped_supabase_client(user.raw_token).table("tenants").upsert(tenant_payload).execute()
             logger.info("tenant_db_record_created", tenant_id=tenant_id, tenant_uuid=tenant_payload["id"])
         except Exception as e:
             logger.error("tenant_provisioning_db_error", error=str(e))
@@ -481,8 +481,8 @@ async def background_import_task(job_id: str, payload: ImportPayload, correlatio
 
     await update_status(10, "Establishing database connection...", 0, 0, 0, [])
     
-    from server.storage_manager import supabase_client
-    if not supabase_client:
+    from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
+    if not get_scoped_supabase_client(user.raw_token):
         # Supabase is offline. Persist contacts to a local JSON file so data is never lost.
         local_contacts_path = f"recordings/local_contacts_{tenant_id}.json"
         logger.info(
@@ -597,17 +597,17 @@ async def background_import_task(job_id: str, payload: ImportPayload, correlatio
             
             try:
                 # Find existing to check duplicate/upsert
-                existing = supabase_client.table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
+                existing = get_scoped_supabase_client(user.raw_token).table("contacts").select("id").eq("phone_number", phone).eq("tenant_id", tenant_id).execute()
                 if existing.data:
                     c_id = existing.data[0]["id"]
-                    supabase_client.table("contacts").update(contact_payload).eq("id", c_id).eq("tenant_id", tenant_id).execute()
+                    get_scoped_supabase_client(user.raw_token).table("contacts").update(contact_payload).eq("id", c_id).eq("tenant_id", tenant_id).execute()
                     details.append({"row": i, "name": name, "phone": phone, "outcome": "skipped", "reason": "Duplicate prospect (updated existing record)"})
                     skipped_count += 1
                     imported_contact_ids.append(c_id)
                 else:
                     c_id = str(uuid.uuid4())
                     contact_payload["id"] = c_id
-                    supabase_client.table("contacts").insert(contact_payload).execute()
+                    get_scoped_supabase_client(user.raw_token).table("contacts").insert(contact_payload).execute()
                     details.append({"row": i, "name": name, "phone": phone, "outcome": "imported", "reason": ""})
                     imported_count += 1
                     imported_contact_ids.append(c_id)
@@ -741,7 +741,7 @@ async def trigger_test_call(payload: TestCallPayload):
 # ----------------------------------------------------
 # ----------------------------------------------------
 @onboarding_router.post("/onboarding/complete")
-async def onboarding_complete(payload: CompletePayload):
+async def onboarding_complete(payload: CompletePayload, user: UserPrincipal = Depends(get_current_user)):
     """
     Triggers a welcome email via Resend API and finalizes onboarding configurations.
     Updates Supabase agent_configs and compliance tables, cascading to local fallback.
@@ -777,8 +777,8 @@ async def onboarding_complete(payload: CompletePayload):
         "country": payload.country,
     }
 
-    from server.storage_manager import supabase_client
-    if supabase_client:
+    from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
+    if get_scoped_supabase_client(user.raw_token):
         try:
             # 1. Update/Upsert agent_configs table
             config_payload = {
@@ -795,12 +795,12 @@ async def onboarding_complete(payload: CompletePayload):
                 "objections_list": payload.objections_list or [],
                 "brand_voice_tone": payload.brand_voice_tone or ""
             }
-            existing = supabase_client.table("agent_configs").select("id").eq("tenant_id", tenant_uuid).execute()
+            existing = get_scoped_supabase_client(user.raw_token).table("agent_configs").select("id").eq("tenant_id", tenant_uuid).execute()
             if existing.data:
-                supabase_client.table("agent_configs").update(config_payload).eq("id", existing.data[0]["id"]).execute()
+                get_scoped_supabase_client(user.raw_token).table("agent_configs").update(config_payload).eq("id", existing.data[0]["id"]).execute()
             else:
                 config_payload["id"] = str(uuid.uuid4())
-                supabase_client.table("agent_configs").insert(config_payload).execute()
+                get_scoped_supabase_client(user.raw_token).table("agent_configs").insert(config_payload).execute()
             logger.info("supabase_agent_configs_updated", tenant_uuid=tenant_uuid)
 
             # 2. Update/Upsert tenant_compliance_settings table
@@ -811,18 +811,18 @@ async def onboarding_complete(payload: CompletePayload):
                 "ai_disclosure_enabled": True,
                 "ai_disclosure_text": "You are speaking with an automated assistant."
             }
-            existing_comp = supabase_client.table("tenant_compliance_settings").select("id").eq("tenant_id", tenant_uuid).execute()
+            existing_comp = get_scoped_supabase_client(user.raw_token).table("tenant_compliance_settings").select("id").eq("tenant_id", tenant_uuid).execute()
             if existing_comp.data:
-                supabase_client.table("tenant_compliance_settings").update(comp_payload).eq("id", existing_comp.data[0]["id"]).execute()
+                get_scoped_supabase_client(user.raw_token).table("tenant_compliance_settings").update(comp_payload).eq("id", existing_comp.data[0]["id"]).execute()
             else:
                 comp_payload["id"] = str(uuid.uuid4())
-                supabase_client.table("tenant_compliance_settings").insert(comp_payload).execute()
+                get_scoped_supabase_client(user.raw_token).table("tenant_compliance_settings").insert(comp_payload).execute()
             logger.info("supabase_tenant_compliance_settings_updated", tenant_uuid=tenant_uuid)
 
             # 3. Save ICP segments to icp_segments table
             if payload.icp_segments:
                 try:
-                    supabase_client.table("icp_segments").delete().eq("tenant_id", tenant_uuid).execute()
+                    get_scoped_supabase_client(user.raw_token).table("icp_segments").delete().eq("tenant_id", tenant_uuid).execute()
                 except Exception as del_err:
                     logger.warn("failed_to_delete_existing_icp_segments", error=str(del_err))
                 
@@ -835,13 +835,13 @@ async def onboarding_complete(payload: CompletePayload):
                     }
                     for s in payload.icp_segments
                 ]
-                supabase_client.table("icp_segments").insert(segments_to_insert).execute()
+                get_scoped_supabase_client(user.raw_token).table("icp_segments").insert(segments_to_insert).execute()
                 logger.info("supabase_icp_segments_saved", count=len(segments_to_insert))
 
             # 4. Save Buyer Personas to buyer_personas table
             if payload.buyer_personas:
                 try:
-                    supabase_client.table("buyer_personas").delete().eq("tenant_id", tenant_uuid).execute()
+                    get_scoped_supabase_client(user.raw_token).table("buyer_personas").delete().eq("tenant_id", tenant_uuid).execute()
                 except Exception as del_err:
                     logger.warn("failed_to_delete_existing_buyer_personas", error=str(del_err))
                 
@@ -854,7 +854,7 @@ async def onboarding_complete(payload: CompletePayload):
                     }
                     for p in payload.buyer_personas
                 ]
-                supabase_client.table("buyer_personas").insert(personas_to_insert).execute()
+                get_scoped_supabase_client(user.raw_token).table("buyer_personas").insert(personas_to_insert).execute()
                 logger.info("supabase_buyer_personas_saved", count=len(personas_to_insert))
 
         except Exception as e:
@@ -985,9 +985,9 @@ async def onboarding_complete(payload: CompletePayload):
     # Trigger Welcome Email via EventBus
     try:
         from server.events.bus import bus
-        # Usually we would pass the actual user's email, but for MVP mock we just pass a string or extract from payload if it exists.
+        # Emit UserRegistered event with the actual user's email
         bus.publish("UserRegistered", {
-            "email": "customer@company.com", # In real life, get from user profile
+            "email": user.email,
             "company_name": payload.company_name
         })
         logger.info("user_registered_event_published")
@@ -997,16 +997,16 @@ async def onboarding_complete(payload: CompletePayload):
 
     # Fetch all contacts to run lead scoring background job
     all_contact_ids = []
-    if supabase_client:
+    if get_scoped_supabase_client(user.raw_token):
         try:
             # Check both possible table names: contacts vs crm_contacts. In our database schema we added background jobs and crm_contacts.
             # Let's try select from crm_contacts first, fallback to contacts
             try:
-                res = supabase_client.table("crm_contacts").select("id").eq("tenant_id", tenant_uuid).execute()
+                res = get_scoped_supabase_client(user.raw_token).table("crm_contacts").select("id").eq("tenant_id", tenant_uuid).execute()
                 if res.data:
                     all_contact_ids = [c["id"] for c in res.data]
             except Exception:
-                res = supabase_client.table("contacts").select("id").eq("tenant_id", tenant_uuid).execute()
+                res = get_scoped_supabase_client(user.raw_token).table("contacts").select("id").eq("tenant_id", tenant_uuid).execute()
                 if res.data:
                     all_contact_ids = [c["id"] for c in res.data]
         except Exception as e:

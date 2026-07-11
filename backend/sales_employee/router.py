@@ -42,7 +42,7 @@ from sales_employee.delivery_tracker import (
     verify_sendgrid_signature,
     check_replay_and_deduplicate,
 )
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 logger = structlog.get_logger("visoora_sales_employee_router")
 
@@ -193,6 +193,49 @@ async def ingest_website(agent_id: str, payload: Dict[str, str], tenant_id: str 
 @sales_employee_router.get("/agents/{agent_id}/knowledge/search")
 async def search_knowledge(agent_id: str, q: str, tenant_id: str = Depends(tenant_from_header)):
     return knowledge_service.retrieve(tenant_id, agent_id, q)
+
+
+@sales_employee_router.post("/agents/{agent_id}/chat")
+async def chat_with_agent(agent_id: str, payload: dict, tenant_id: str = Depends(tenant_from_header)):
+    """
+    Interact with the agent's knowledge base via a chat interface.
+    payload expects: {"message": "Hello", "history": [{"role": "user", "content": "..."}]}
+    """
+    message = payload.get("message", "")
+    history = payload.get("history", [])
+    
+    # 1. Retrieve knowledge context
+    context = knowledge_service.build_persona_context(tenant_id, agent_id, query=message)
+    persona = context.get("persona_config", {})
+    knowledge = context.get("knowledge_context", "No explicit knowledge retrieved.")
+    
+    # 2. Construct Prompt
+    system_prompt = f"""You are a helpful AI assistant for the Visoora dashboard.
+Your persona configuration is: {json.dumps(persona)}
+You have access to the following knowledge base regarding the user's business/tenant:
+---
+{knowledge}
+---
+Answer the user's questions based primarily on the knowledge provided. If you don't know the answer, say so politely."""
+
+    # Format history into the user prompt
+    history_text = ""
+    for msg in history[-5:]: # last 5 turns
+        role = msg.get("role", "user").capitalize()
+        content = msg.get("content", "")
+        history_text += f"{role}: {content}\n"
+        
+    user_prompt = f"{history_text}\nUser: {message}\nAssistant:"
+    
+    from ai_platform.providers.llm_provider import get_llm_provider, GenerationConfig
+    provider = get_llm_provider()
+    
+    try:
+        reply = await provider.generate_text(system_prompt, user_prompt, GenerationConfig(temperature=0.6, max_tokens=1000))
+        return {"reply": reply}
+    except Exception as exc:
+        logger.error("chatbot_generation_failed", error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to generate chat response.")
 
 
 # ====================================================

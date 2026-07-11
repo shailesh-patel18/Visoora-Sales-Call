@@ -6,7 +6,7 @@ import structlog
 import asyncio
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from pipeline.states import get_tenant_config
 from crm.auto_advance import _load_local_json, _save_local_json
 from server.worker import register_job_handler

@@ -4,7 +4,7 @@ import datetime
 import asyncio
 import structlog
 from typing import Dict, Any, Callable, Optional, List
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client
 
 logger = structlog.get_logger("visoora_worker")
 
@@ -36,10 +36,10 @@ async def process_next_job():
     Looks for the oldest 'queued' background job, claims it atomically,
     executes its registered handler, and updates its status.
     """
-    if supabase_client:
+    if supabase_admin_client:
         try:
             # 1. Fetch oldest queued job
-            res = supabase_client.table("workflow_jobs")\
+            res = supabase_admin_client.table("workflow_jobs")\
                 .select("*")\
                 .eq("status", "queued")\
                 .order("created_at", desc=False)\
@@ -56,7 +56,7 @@ async def process_next_job():
             tenant_id = job["tenant_id"]
 
             # 2. Claim job atomically using optimistic lock
-            claim_res = supabase_client.table("workflow_jobs")\
+            claim_res = supabase_admin_client.table("workflow_jobs")\
                 .update({
                     "status": "running",
                     "updated_at": datetime.datetime.utcnow().isoformat()
@@ -93,7 +93,7 @@ async def process_next_job():
                     result = handler(payload, job_id=job_id)
                 
                 # Mark as success
-                supabase_client.table("workflow_jobs")\
+                supabase_admin_client.table("workflow_jobs")\
                     .update({
                         "status": "success",
                         "result_id": result.get("id") if result and isinstance(result, dict) else None,
@@ -107,7 +107,7 @@ async def process_next_job():
             except Exception as handler_err:
                 logger.error("job_handler_error_db", job_id=job_id, workflow_type=workflow_type, error=str(handler_err))
                 emit_workflow_event(job_id, event_type="workflow_failed", payload={"error": str(handler_err)})
-                supabase_client.table("workflow_jobs")\
+                supabase_admin_client.table("workflow_jobs")\
                     .update({
                         "status": "failed",
                         "error": str(handler_err),
@@ -153,9 +153,9 @@ async def enqueue_background_job(tenant_id: str, job_type: str, payload: dict) -
         "updated_at": now
     }
 
-    if supabase_client:
+    if supabase_admin_client:
         try:
-            res = supabase_client.table("background_jobs").insert(job_data).execute()
+            res = supabase_admin_client.table("background_jobs").insert(job_data).execute()
             if res.data:
                 logger.info("job_enqueued_programmatic_db", job_id=job_id, job_type=job_type, tenant_id=tenant_id)
                 return res.data[0]

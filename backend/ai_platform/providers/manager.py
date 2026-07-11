@@ -39,13 +39,14 @@ class ProviderManager:
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         provider = self._select_provider(capabilities or [])
         logger.info("routing_request", task="completion", provider=provider.name)
         
         try:
-            return await provider.generate_completion(prompt, system_instruction, capabilities)
+            return await provider.generate_completion(prompt, system_instruction, capabilities, max_tokens)
         except Exception as e:
             logger.error("provider_error", provider=provider.name, error=str(e))
             # Fallback logic could be inserted here if we want to catch and iterate through fallbacks
@@ -62,7 +63,8 @@ class ProviderManager:
         prompt: str,
         schema: Any,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         req_caps = capabilities or []
         if Capability.JSON_SCHEMA not in req_caps:
@@ -72,7 +74,7 @@ class ProviderManager:
         logger.info("routing_request", task="structured_output", provider=provider.name)
         
         try:
-            return await provider.generate_structured_output(prompt, schema, system_instruction, req_caps)
+            return await provider.generate_structured_output(prompt, schema, system_instruction, req_caps, max_tokens)
         except Exception as e:
             logger.error("provider_error", provider=provider.name, error=str(e))
             raise

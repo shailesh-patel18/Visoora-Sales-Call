@@ -7,7 +7,7 @@ logger = structlog.get_logger(__name__)
 # Initialize default storage abstraction based on environment
 storage_backend: TelemetryStorage
 try:
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client:
         storage_backend = SupabaseStorage(supabase_client)
         logger.info("telemetry_storage_initialized", backend="supabase")

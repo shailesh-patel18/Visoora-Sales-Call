@@ -14,11 +14,13 @@ import json
 import random
 import httpx
 from pydantic import BaseModel
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from typing import Dict, Any, List, Optional
+import structlog
 
 from security.rbac import get_current_user, UserPrincipal
-from server.storage_manager import supabase_client
+from server.worker import enqueue_background_job
+from server.storage_manager import get_scoped_supabase_client, supabase_admin_client
 from security.config import settings
 
 analytics_router = APIRouter(prefix="/analytics", tags=["Analytics"])
@@ -143,7 +145,7 @@ async def get_dashboard_metrics(user: UserPrincipal = Depends(get_current_user))
         except Exception:
             pass  # Redis failure — proceed to DB/local fallback
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         if settings.app_env not in ("development", "test"):
             raise HTTPException(status_code=500, detail="Database connection offline.")
         # M2.1b: Compute metrics from local JSON instead of raising 500
@@ -155,11 +157,11 @@ async def get_dashboard_metrics(user: UserPrincipal = Depends(get_current_user))
     try:
         tenant_uuid = getattr(user, "tenant_uuid", tenant_id)
         # Fetch pending approvals
-        pending_res = supabase_client.table("mission_artifacts").select("id", count="exact").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
+        pending_res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("id", count="exact").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
         pending_approval = pending_res.count if pending_res.count is not None else len(pending_res.data or [])
         
         # Fetch queued/sent artifacts
-        success_res = supabase_client.table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).in_("status", ["SENT", "QUEUED"]).execute()
+        success_res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).in_("status", ["SENT", "QUEUED"]).execute()
         arts = success_res.data or []
         success_calls = len(arts)
         
@@ -229,15 +231,15 @@ async def get_funnel_metrics(user: UserPrincipal = Depends(get_current_user)):
         except Exception:
             pass
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         if settings.app_env not in ("development", "test"):
             raise HTTPException(status_code=500, detail="Database connection offline.")
         return {"funnel": [], "source": "local_fallback"}
 
     try:
-        deals_res = supabase_client.table("deals").select("stage_id").eq("tenant_id", tenant_id).execute()
+        deals_res = get_scoped_supabase_client(user.raw_token).table("deals").select("stage_id").eq("tenant_id", tenant_id).execute()
         stages_res = (
-            supabase_client.table("pipeline_stages")
+            get_scoped_supabase_client(user.raw_token).table("pipeline_stages")
             .select("id, name, position")
             .eq("tenant_id", tenant_id)
             .order("position")
@@ -323,7 +325,7 @@ async def list_call_logs(
     tenant_id = user.tenant_id
 
     # ── Local JSON fallback (no Supabase) ──────────────────────────────────
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         if settings.app_env not in ("development", "test"):
             raise HTTPException(status_code=500, detail="Database connection offline.")
         logs = []
@@ -352,7 +354,7 @@ async def list_call_logs(
     # ── Supabase live path ──────────────────────────────────────────────────
     try:
         query = (
-            supabase_client.table("call_logs")
+            get_scoped_supabase_client(user.raw_token).table("call_logs")
             .select(
                 "id, tenant_id, phone_number, duration_seconds, "
                 "final_state, recording_url, created_at"
@@ -370,7 +372,7 @@ async def list_call_logs(
 
         # Get total count for pagination
         count_result = (
-            supabase_client.table("call_logs")
+            get_scoped_supabase_client(user.raw_token).table("call_logs")
             .select("id", count="exact")
             .eq("tenant_id", tenant_id)
             .execute()
@@ -414,7 +416,7 @@ async def get_call_detail(
     tenant_id = user.tenant_id
 
     # ── Local JSON fallback ─────────────────────────────────────────────────
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         if settings.app_env not in ("development", "test"):
             raise HTTPException(status_code=500, detail="Database connection offline.")
         if os.path.exists(LOCAL_CALL_LOGS_PATH):
@@ -448,7 +450,7 @@ async def get_call_detail(
     # ── Supabase live path ──────────────────────────────────────────────────
     try:
         result = (
-            supabase_client.table("call_logs")
+            get_scoped_supabase_client(user.raw_token).table("call_logs")
             .select("*")
             .eq("id", call_id)
             .eq("tenant_id", tenant_id)  # Tenant isolation enforced
@@ -463,7 +465,7 @@ async def get_call_detail(
         phone = call_obj.get("phone_number")
         if phone:
             try:
-                c_res = supabase_client.table("contacts").select("*").eq("phone", phone).execute()
+                c_res = get_scoped_supabase_client(user.raw_token).table("contacts").select("*").eq("phone", phone).execute()
                 if c_res.data:
                     contact = c_res.data[0]
                     call_obj["name"] = contact.get("name")
@@ -583,9 +585,9 @@ async def get_opportunity_radar(
     # Try to fetch unique company names from local contacts or database
     companies = []
     
-    if supabase_client:
+    if get_scoped_supabase_client(user.raw_token):
         try:
-            res = supabase_client.table("contacts").select("company").eq("tenant_id", tenant_id).execute()
+            res = get_scoped_supabase_client(user.raw_token).table("contacts").select("company").eq("tenant_id", tenant_id).execute()
             if res.data:
                 companies = list(set([c["company"] for c in res.data if c.get("company")]))
         except Exception:
@@ -641,9 +643,9 @@ async def get_business_map(
 
     # 1. Load agent config details
     config_data = {}
-    if supabase_client:
+    if get_scoped_supabase_client(user.raw_token):
         try:
-            res = supabase_client.table("agent_configs").select("*").eq("tenant_id", tenant_uuid).execute()
+            res = get_scoped_supabase_client(user.raw_token).table("agent_configs").select("*").eq("tenant_id", tenant_uuid).execute()
             if res.data:
                 config_data = res.data[0]
         except Exception:
@@ -663,9 +665,9 @@ async def get_business_map(
 
     # 2. Load ICP Segments
     segments = []
-    if supabase_client:
+    if get_scoped_supabase_client(user.raw_token):
         try:
-            res = supabase_client.table("icp_segments").select("*").eq("tenant_id", tenant_uuid).execute()
+            res = get_scoped_supabase_client(user.raw_token).table("icp_segments").select("*").eq("tenant_id", tenant_uuid).execute()
             if res.data:
                 segments = res.data
         except Exception:
@@ -681,9 +683,9 @@ async def get_business_map(
 
     # 3. Load Buyer Personas
     personas = []
-    if supabase_client:
+    if get_scoped_supabase_client(user.raw_token):
         try:
-            res = supabase_client.table("buyer_personas").select("*").eq("tenant_id", tenant_uuid).execute()
+            res = get_scoped_supabase_client(user.raw_token).table("buyer_personas").select("*").eq("tenant_id", tenant_uuid).execute()
             if res.data:
                 personas = res.data
         except Exception:
@@ -722,7 +724,7 @@ async def get_missions_timeline(user: UserPrincipal = Depends(get_current_user))
     if not tenant_uuid:
         return {"events": []}
     
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         return {"events": []}
         
     events = []
@@ -730,7 +732,7 @@ async def get_missions_timeline(user: UserPrincipal = Depends(get_current_user))
         from datetime import datetime, timedelta
         
         # Fetch workflow jobs (background research jobs)
-        jobs_res = supabase_client.table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(2).execute()
+        jobs_res = get_scoped_supabase_client(user.raw_token).table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(2).execute()
         for job in (jobs_res.data or []):
             time_str = job.get("created_at", "")
             if not time_str:
@@ -800,7 +802,7 @@ async def get_missions_timeline(user: UserPrincipal = Depends(get_current_user))
             })
                 
         # Fetch artifacts
-        arts_res = supabase_client.table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(5).execute()
+        arts_res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(5).execute()
         for art in (arts_res.data or []):
             time_str = art.get("created_at", "")
             try:
@@ -929,25 +931,44 @@ async def launch_mission(
             raise HTTPException(status_code=429, detail="Mission launch rate limit exceeded (Max 5 per hour).")
 
     # 3. Concurrency Check (Don't enqueue duplicates)
-    if supabase_client:
-        active_res = supabase_client.table("workflow_jobs").select("id").eq("tenant_id", tenant_uuid).in_("status", ["pending", "processing"]).execute()
+    if get_scoped_supabase_client(user.raw_token):
+        active_res = get_scoped_supabase_client(user.raw_token).table("workflow_jobs").select("id").eq("tenant_id", tenant_uuid).in_("status", ["pending", "processing"]).execute()
         if active_res.data and len(active_res.data) > 0:
             logger.info("mission_already_running", tenant_id=tenant_uuid)
             return {"success": True, "message": "Mission is already running"}
 
     try:
+        from server.services.mission_engine import create_mission
+        
+        business_brain_id = None
+        if get_scoped_supabase_client(user.raw_token):
+            bb_res = get_scoped_supabase_client(user.raw_token).table("business_brains").select("id").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(1).execute()
+            if bb_res.data:
+                business_brain_id = bb_res.data[0]["id"]
+                
+        # Create the mission in the DB first
+        mission = create_mission(
+            tenant_id=tenant_uuid,
+            business_brain_id=business_brain_id,
+            mission_type="prospecting",
+            goal=payload.goal
+        )
+        
         from server.worker import enqueue_background_job
         await enqueue_background_job(
             tenant_id=tenant_uuid,
             job_type="company_research",
             payload={
                 "tenant_id": tenant_uuid, 
+                "mission_id": mission.id,
                 "mission_name": payload.mission_name,
                 "goal": payload.goal,
                 "audience": payload.audience
             }
         )
-        logger.info("explicit_mission_launched", tenant=tenant_id, mission_name=payload.mission_name)
+        logger.info("explicit_mission_launched", tenant=tenant_id, mission_name=payload.mission_name, mission_id=mission.id)
+        
+        return {"success": True, "mission_id": mission.id, "message": "Mission launched successfully."}
         return {"success": True, "message": "Mission launched successfully"}
     except Exception as e:
         logger.error("explicit_mission_launch_failed", error=str(e))
@@ -964,12 +985,12 @@ async def get_mission_status(user: UserPrincipal = Depends(get_current_user)):
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         return {}
 
     try:
         # Get latest company_research job for this tenant
-        res = supabase_client.table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).eq("workflow_type", "company_research").order("created_at", desc=True).limit(1).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).eq("workflow_type", "company_research").order("created_at", desc=True).limit(1).execute()
         if not res.data:
             # Fallback mock data for pilot presentation
             return {"stage": "HUMAN_APPROVAL", "pct": 100}
@@ -1001,11 +1022,11 @@ async def get_inbox_artifacts(user: UserPrincipal = Depends(get_current_user)):
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
 
     try:
-        res = supabase_client.table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
         
         out = []
         for row in (res.data or []):
@@ -1068,13 +1089,13 @@ async def get_inbox_artifacts(user: UserPrincipal = Depends(get_current_user)):
 
 @analytics_router.post("/inbox/artifacts/{artifact_id}/approve")
 async def approve_artifact(artifact_id: str, user: UserPrincipal = Depends(get_current_user)):
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
         
     try:
         tenant_uuid = _get_tenant_uuid(user)
         # Update status to QUEUED
-        update_res = supabase_client.table("mission_artifacts").update({"status": "QUEUED"}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
+        update_res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({"status": "QUEUED"}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
         if not update_res.data:
             raise HTTPException(status_code=404, detail="Artifact not found or access denied")
             
@@ -1082,6 +1103,13 @@ async def approve_artifact(artifact_id: str, user: UserPrincipal = Depends(get_c
         
         # AUDIT LOG
         logger.info("audit_event", action="Approved Email", user_email=user.email, user_id=user.user_id, artifact_id=artifact_id, tenant_id=tenant_uuid, mission_id=artifact.get("mission_id"))
+        
+        # Enqueue the actual dispatch job
+        await enqueue_background_job(
+            tenant_id=tenant_uuid,
+            job_type="email_dispatch",
+            payload={"artifact_id": artifact_id}
+        )
         
         # MVP Simulation: Immediately book a meeting after email approval for the demo wow-factor
         try:
@@ -1104,12 +1132,12 @@ async def approve_artifact(artifact_id: str, user: UserPrincipal = Depends(get_c
 
 @analytics_router.post("/inbox/artifacts/{artifact_id}/reject")
 async def reject_artifact(artifact_id: str, user: UserPrincipal = Depends(get_current_user)):
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
         
     try:
         tenant_uuid = _get_tenant_uuid(user)
-        update_res = supabase_client.table("mission_artifacts").update({"status": "REJECTED"}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
+        update_res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({"status": "REJECTED"}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
         if not update_res.data:
             raise HTTPException(status_code=404, detail="Artifact not found or access denied")
             
@@ -1139,10 +1167,10 @@ async def get_inbox_count(user: UserPrincipal = Depends(get_current_user)):
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         return {"count": 0}
     try:
-        res = supabase_client.table("mission_artifacts").select("id", count="exact").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("id", count="exact").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
         count = res.count if res.count is not None else len(res.data or [])
         return {"count": count}
     except Exception as e:
@@ -1157,10 +1185,10 @@ class EditArtifactPayload(BaseModel):
 @analytics_router.patch("/inbox/artifacts/{artifact_id}")
 async def edit_artifact(artifact_id: str, payload: EditArtifactPayload, user: UserPrincipal = Depends(get_current_user)):
     """CEO saves edits to an email draft. Previous body is pushed into version history inside metadata."""
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
     try:
-        res = supabase_client.table("mission_artifacts").select("content,metadata").eq("id", artifact_id).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("content,metadata").eq("id", artifact_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Artifact not found")
         artifact = res.data[0]
@@ -1184,7 +1212,7 @@ async def edit_artifact(artifact_id: str, payload: EditArtifactPayload, user: Us
         if payload.email_subject is not None:
             content_obj["subject"] = payload.email_subject
 
-        supabase_client.table("mission_artifacts").update({
+        get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({
             "content": content_obj,
             "metadata": metadata
         }).eq("id", artifact_id).execute()
@@ -1211,10 +1239,10 @@ async def regenerate_artifact(artifact_id: str, payload: RegeneratePayload, user
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
     try:
-        res = supabase_client.table("mission_artifacts").select("*").eq("id", artifact_id).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("id", artifact_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Artifact not found")
         artifact = res.data[0]
@@ -1227,7 +1255,7 @@ async def regenerate_artifact(artifact_id: str, payload: RegeneratePayload, user
             "brand_voice_tone": "Direct, Professional, Concise"
         }
         try:
-            brain_res = supabase_client.table("tenants").select("settings").eq("id", tenant_uuid).execute()
+            brain_res = get_scoped_supabase_client(user.raw_token).table("tenants").select("settings").eq("id", tenant_uuid).execute()
             if brain_res.data and brain_res.data[0].get("settings", {}).get("business_brain"):
                 business_brain = brain_res.data[0]["settings"]["business_brain"]
         except Exception:
@@ -1261,7 +1289,7 @@ async def regenerate_artifact(artifact_id: str, payload: RegeneratePayload, user
         metadata["business_brain_match"] = new_draft.get("business_brain_match", 90)
         metadata["spam_risk"] = new_draft.get("spam_risk", "Low")
 
-        supabase_client.table("mission_artifacts").update({
+        get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({
             "email_body": new_draft.get("email_body", ""),
             "email_subject": new_draft.get("email_subject", artifact.get("email_subject", "")),
             "confidence": new_draft.get("personalization_score", 90),
@@ -1290,10 +1318,10 @@ async def generate_alternatives(artifact_id: str, user: UserPrincipal = Depends(
     """Generates 3 tonal alternatives (Professional, Friendly, Very Short) in parallel."""
     tenant_uuid = _get_tenant_uuid(user)
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
     try:
-        res = supabase_client.table("mission_artifacts").select("*").eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Artifact not found or access denied")
         artifact = res.data[0]
@@ -1306,7 +1334,7 @@ async def generate_alternatives(artifact_id: str, user: UserPrincipal = Depends(
             "brand_voice_tone": "Direct, Professional, Concise"
         }
         try:
-            brain_res = supabase_client.table("tenants").select("settings").eq("id", tenant_uuid).execute()
+            brain_res = get_scoped_supabase_client(user.raw_token).table("tenants").select("settings").eq("id", tenant_uuid).execute()
             if brain_res.data and brain_res.data[0].get("settings", {}).get("business_brain"):
                 business_brain = brain_res.data[0]["settings"]["business_brain"]
         except Exception:
@@ -1327,7 +1355,7 @@ async def generate_alternatives(artifact_id: str, user: UserPrincipal = Depends(
         # Save alternatives to metadata
         metadata = artifact.get("metadata") or {}
         metadata["alternatives"] = alternatives
-        supabase_client.table("mission_artifacts").update({"metadata": metadata}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
+        get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({"metadata": metadata}).eq("id", artifact_id).eq("tenant_id", tenant_uuid).execute()
 
         return {"success": True, "alternatives": alternatives}
     except HTTPException:
@@ -1342,15 +1370,23 @@ async def approve_batch(user: UserPrincipal = Depends(get_current_user)):
     """Approves ALL pending WAITING_APPROVAL artifacts for this tenant in one call."""
     tenant_uuid = _get_tenant_uuid(user)
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
     try:
-        res = supabase_client.table("mission_artifacts").select("id").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("id").eq("tenant_id", tenant_uuid).eq("status", "WAITING_APPROVAL").execute()
         ids = [r["id"] for r in (res.data or [])]
         if not ids:
             return {"success": True, "approved": 0}
-        supabase_client.table("mission_artifacts").update({"status": "QUEUED"}).in_("id", ids).execute()
+        get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({"status": "QUEUED"}).in_("id", ids).execute()
         
+        # Enqueue dispatch jobs for all approved artifacts
+        for aid in ids:
+            await enqueue_background_job(
+                tenant_id=tenant_uuid,
+                job_type="email_dispatch",
+                payload={"artifact_id": aid}
+            )
+            
         # AUDIT LOG
         logger.info("audit_event", action="Batch Approved Emails", user_email=user.email, user_id=user.user_id, tenant_id=tenant_uuid, count=len(ids))
         
@@ -1370,12 +1406,12 @@ async def get_missions_list(user: UserPrincipal = Depends(get_current_user)):
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         return {"missions": []}
 
     try:
         # Get all workflow jobs of type company_research
-        res = supabase_client.table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).eq("workflow_type", "company_research").order("created_at", desc=True).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("workflow_jobs").select("*").eq("tenant_id", tenant_uuid).eq("workflow_type", "company_research").order("created_at", desc=True).execute()
         jobs = res.data or []
         
         missions = []
@@ -1404,12 +1440,12 @@ async def get_mission_results(mission_id: str, user: UserPrincipal = Depends(get
         except Exception:
             tenant_uuid = tenant_id
 
-    if not supabase_client:
+    if not get_scoped_supabase_client(user.raw_token):
         raise HTTPException(status_code=500, detail="Database connection offline.")
 
     try:
         # Get artifacts for this specific mission
-        res = supabase_client.table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).eq("mission_id", mission_id).execute()
+        res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts").select("*").eq("tenant_id", tenant_uuid).eq("mission_id", mission_id).execute()
         my_artifacts = res.data or []
         
         emails_drafted = len(my_artifacts)

@@ -6,7 +6,7 @@ from html import escape
 from urllib.parse import urlencode, urlparse
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Request, Response, Depends, Form
 import structlog
-from server.storage_manager import supabase_client
+from server.storage_manager import get_scoped_supabase_admin_client, supabase_admin_client
 from security.config import settings
 from security.twilio_auth import verify_twilio_signature
 from services.calendar import calendar_service
@@ -97,9 +97,9 @@ async def handle_inbound_call_webhook(
     company_name = "Visoora"
     
     # 1. Look up tenant by inbound phone number (To parameter)
-    if supabase_client:
+    if supabase_admin_client:
         try:
-            res = supabase_client.table("tenants").select("*").eq("twilio_phone", To).execute()
+            res = supabase_admin_client.table("tenants").select("*").eq("twilio_phone", To).execute()
             if res.data:
                 tenant = res.data[0]
                 tenant_id = tenant["id"]
@@ -252,9 +252,9 @@ class InboundFSMController:
                 
                 # Resolve contact id
                 contact_id = "contact_fallback"
-                if supabase_client:
+                if supabase_admin_client:
                     try:
-                        res = supabase_client.table("contacts").select("id").eq("phone_e164", self.caller_phone).eq("tenant_id", self.tenant_id).execute()
+                        res = supabase_admin_client.table("contacts").select("id").eq("phone_e164", self.caller_phone).eq("tenant_id", self.tenant_id).execute()
                         if res.data:
                             contact_id = res.data[0]["id"]
                     except Exception:
@@ -353,9 +353,9 @@ class InboundFSMController:
 
     def _get_available_agent(self) -> Optional[Dict[str, Any]]:
         """Queries availability table to find active agent."""
-        if supabase_client:
+        if supabase_admin_client:
             try:
-                res = supabase_client.table("agent_availability").select("*").eq("tenant_id", self.tenant_id).eq("is_available", True).execute()
+                res = supabase_admin_client.table("agent_availability").select("*").eq("tenant_id", self.tenant_id).eq("is_available", True).execute()
                 if res.data:
                     return res.data[0]
             except Exception as e:
@@ -389,9 +389,9 @@ class InboundFSMController:
         }
         
         # Supabase Persist
-        if supabase_client:
+        if supabase_admin_client:
             try:
-                supabase_client.table("contacts").insert(contact_payload).execute()
+                supabase_admin_client.table("contacts").insert(contact_payload).execute()
                 logger.info("db_contact_created", id=contact_id)
             except Exception as e:
                 logger.error("db_contact_persist_failed", error=str(e))
@@ -427,9 +427,9 @@ class InboundFSMController:
             "created_at": datetime.datetime.utcnow().isoformat()
         }
         
-        if supabase_client:
+        if supabase_admin_client:
             try:
-                supabase_client.table("callback_tasks").insert(task_payload).execute()
+                supabase_admin_client.table("callback_tasks").insert(task_payload).execute()
                 logger.info("db_callback_task_created", id=task_id)
             except Exception as e:
                 logger.error("db_callback_task_failed", error=str(e))
@@ -509,3 +509,44 @@ async def handle_inbound_media_stream(websocket: WebSocket, tenant_id: str):
         logger.error("inbound_websocket_error", error=str(e))
     finally:
         logger.info("inbound_websocket_closed")
+
+@inbound_router.get("/api/webhooks/nylas")
+async def nylas_webhook_challenge(challenge: str = Query(...)):
+    """Nylas requires an echo of the challenge parameter to verify the webhook."""
+    return Response(content=challenge, media_type="text/plain")
+
+@inbound_router.post("/api/webhooks/nylas")
+async def nylas_webhook(request: Request):
+    """
+    Handles Nylas webhook events for tracking email replies and bounces.
+    Event types: message.created (replies), message.bounced (bounces)
+    """
+    try:
+        body = await request.json()
+        
+        # Verify Nylas signature in production if needed, skipping for MVP
+        events = body.get("data", [])
+        for event in events:
+            event_type = event.get("type")
+            message_data = event.get("object_data", {})
+            
+            if event_type == "message.created":
+                # Check if this is a reply to one of our sent emails
+                # The message_data usually has reply_to_message_id or thread_id
+                # For this demo, we'll log it and trigger the follow-up agent if it matches an active mission
+                message_id = message_data.get("id")
+                thread_id = message_data.get("thread_id")
+                logger.info("email_reply_received", message_id=message_id, thread_id=thread_id)
+                
+                # Here we would enqueue a job for the Follow-Up Engine
+                # enqueue_background_job(tenant_id, "follow_up_agent", {"message_id": message_id})
+                
+            elif event_type == "message.bounced":
+                logger.warn("email_bounced", message_data=message_data)
+                # Update contact status or artifact status to 'bounced'
+                
+        return {"success": True}
+    except Exception as e:
+        logger.error("nylas_webhook_error", error=str(e))
+        # Return 200 anyway so Nylas doesn't retry infinitely on a bad payload
+        return {"success": False}

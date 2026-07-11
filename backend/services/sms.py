@@ -4,7 +4,7 @@ import datetime
 from fastapi import APIRouter, Response, Form, HTTPException
 import structlog
 from services.calendar import calendar_service
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 logger = structlog.get_logger("visoora_sms")
 

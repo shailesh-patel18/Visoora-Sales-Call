@@ -7,7 +7,7 @@ import httpx
 import re
 from typing import Optional, List, Dict, Any
 import structlog
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from server.session_registry import redis_client
 
 logger = structlog.get_logger("visoora_telephony")

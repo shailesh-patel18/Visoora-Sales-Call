@@ -31,7 +31,8 @@ class BaseAgent:
         prompt_id: str, 
         context: str, 
         schema: Optional[Any] = None,
-        extra_capabilities: Optional[List[Capability]] = None
+        extra_capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = 4000
     ) -> Any:
         
         if not PolicyLayer.validate_request(self.tenant_id, task_name, {"context": context}):
@@ -50,14 +51,16 @@ class BaseAgent:
                     prompt=context,
                     schema=schema,
                     system_instruction=prompt.system_instruction,
-                    capabilities=capabilities
+                    capabilities=capabilities,
+                    max_tokens=max_tokens
                 )
             else:
                 # Otherwise, text completion
                 res = await self.provider_manager.generate_completion(
                     prompt=context,
                     system_instruction=prompt.system_instruction,
-                    capabilities=capabilities
+                    capabilities=capabilities,
+                    max_tokens=max_tokens
                 )
                 
             telemetry_tracker.log_request(

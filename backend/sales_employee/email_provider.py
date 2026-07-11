@@ -320,6 +320,54 @@ class PostmarkProvider(EmailProviderInterface):
                 "status": "sent"
             }
 
+class NylasProvider(EmailProviderInterface):
+    async def send_email(
+        self,
+        to_email: str,
+        subject: str,
+        body: str,
+        from_email: str,
+        connection_config: Dict[str, Any],
+        prev_msg_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
+    ) -> Dict[str, Any]:
+        api_key = connection_config.get("api_key", os.getenv("NYLAS_API_KEY", ""))
+        grant_id = connection_config.get("grant_id", "")
+        
+        if os.getenv("APP_ENV") in ("development", "test") or api_key == "mock":
+            if "invalid" in api_key or "expired" in api_key:
+                raise RuntimeError("Nylas authentication failed (Invalid API Key)")
+            new_msg_id = f"nylas_mock_{uuid.uuid4()}"
+            logger.info("nylas_send_mock", to=to_email, from_addr=from_email, grant_id=grant_id, msg_id=new_msg_id)
+            return {"provider": "nylas", "message_id": new_msg_id, "status": "sent", "details": {"mocked": True}}
+
+        if not grant_id:
+            raise ValueError("NylasProvider requires a 'grant_id' in the connection_config.")
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            payload = {
+                "subject": subject,
+                "body": body,
+                "to": [{"email": to_email}],
+                "reply_to": [{"email": from_email}]
+            }
+            if prev_msg_id:
+                payload["reply_to_message_id"] = prev_msg_id
+                
+            response = await client.post(
+                f"https://api.us.nylas.com/v3/grants/{grant_id}/messages/send",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+            if response.status_code >= 300:
+                raise RuntimeError(f"Nylas send failed with {response.status_code}: {response.text[:300]}")
+            data = response.json()
+            return {
+                "provider": "nylas",
+                "message_id": data.get("data", {}).get("id", f"ny_{uuid.uuid4()}"),
+                "status": "sent"
+            }
+
 # Mapping registry of email providers
 PROVIDERS: Dict[str, EmailProviderInterface] = {
     "gmail": GmailOAuthProvider(),
@@ -328,7 +376,8 @@ PROVIDERS: Dict[str, EmailProviderInterface] = {
     "sendgrid": SendGridProvider(),
     "resend": ResendProvider(),
     "ses": SESProvider(),
-    "postmark": PostmarkProvider()
+    "postmark": PostmarkProvider(),
+    "nylas": NylasProvider()
 }
 
 async def send_via_mailbox(

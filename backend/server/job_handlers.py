@@ -9,7 +9,10 @@ import structlog
 from server.worker import register_job_handler
 from server.workflow_engine import update_job_step, WorkflowStep
 from ai_platform.agents.research_agent import ResearchAgent
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
+from ai_platform.agents.planning_agent import PlanningAgent
+from sales_employee.mailbox_manager import get_default_mailbox, enforce_mailbox_rate_limits
+from sales_employee.email_provider import send_via_mailbox
 
 logger = structlog.get_logger("job_handlers")
 
@@ -268,3 +271,81 @@ register_job_handler("email_agent", email_agent_handler)
 register_job_handler("voice_agent", voice_agent_handler)
 register_job_handler("post_call_analysis_agent", post_call_analysis_agent_handler)
 
+async def mission_planning_handler(payload: dict, job_id: str) -> dict:
+    update_job_step(job_id, "mission_planning", "running")
+    tenant_id = tenant_id_var.get()
+    
+    mission_id = payload.get("mission_id")
+    goal = payload.get("goal")
+    business_brain = payload.get("business_brain")
+    
+    if not mission_id or not goal or not business_brain:
+        update_job_step(job_id, "mission_planning", "failed")
+        raise ValueError("Missing payload attributes for mission_planning")
+    
+    planner = PlanningAgent(tenant_id=tenant_id)
+    await planner.generate_mission_plan(mission_id, goal, business_brain)
+    
+    update_job_step(job_id, "mission_planning", "success")
+    return {"mission_id": mission_id, "status": "planning_completed"}
+
+register_job_handler("mission_planning", mission_planning_handler)
+
+async def email_dispatch_handler(payload: dict, job_id: str) -> dict:
+    update_job_step(job_id, "email_dispatch", "running")
+    tenant_id = tenant_id_var.get()
+    artifact_id = payload.get("artifact_id")
+    
+    if not artifact_id:
+        update_job_step(job_id, "email_dispatch", "failed")
+        raise ValueError("Missing artifact_id for email_dispatch")
+        
+    # Fetch artifact to send
+    res = supabase_client.table("mission_artifacts").select("*").eq("id", artifact_id).execute()
+    if not res.data:
+        update_job_step(job_id, "email_dispatch", "failed")
+        raise ValueError("Artifact not found")
+        
+    artifact = res.data[0]
+    subject = artifact.get("email_subject") or "Introduction"
+    body = artifact.get("email_body") or ""
+    
+    # In a real app we'd look up the contact to get the email, but for MVP we might mock the email if not present
+    # The artifact might have prospect_name or company_name. 
+    # Let's derive a safe mock email to avoid spamming real people during MVP tests if none is set
+    to_email = artifact.get("prospect_email")
+    if not to_email:
+        name_part = (artifact.get("prospect_name") or "prospect").replace(" ", ".").lower()
+        to_email = f"{name_part}@example.com"
+        
+    mailbox = get_default_mailbox(tenant_id)
+    if not mailbox:
+        # Fallback to a system default if no mailbox is connected
+        mailbox = {
+            "provider": "smtp",
+            "email": "hello@visoora.example.com",
+            "connection_config": "{}" # Mock fallback config
+        }
+        
+    try:
+        # Enforce Tier 2 Deliverability Guardrails (daily limits, 5-second gaps)
+        await enforce_mailbox_rate_limits(tenant_id, mailbox.get("id"))
+        
+        result = await send_via_mailbox(
+            mailbox=mailbox,
+            to_email=to_email,
+            subject=subject,
+            body=body
+        )
+        
+        # Update artifact status
+        supabase_client.table("mission_artifacts").update({"status": "SENT"}).eq("id", artifact_id).execute()
+        update_job_step(job_id, "email_dispatch", "success")
+        return {"artifact_id": artifact_id, "status": "sent", "dispatch_result": result}
+        
+    except Exception as e:
+        logger.error("email_dispatch_failed", artifact_id=artifact_id, error=str(e))
+        update_job_step(job_id, "email_dispatch", "failed")
+        raise
+
+register_job_handler("email_dispatch", email_dispatch_handler)

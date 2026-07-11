@@ -54,7 +54,7 @@ async def get_tenant_billing_info(tenant_id: str) -> Dict[str, Any]:
         "twilio_phone": "+15017122661",
     }
     
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client:
         try:
             res = supabase_client.table("tenants").select("*").eq("id", tenant_id).execute()
@@ -86,7 +86,7 @@ async def save_tenant_billing_info(tenant_id: str, updates: Dict[str, Any]) -> b
     """
     logger.info("save_tenant_billing_info_start", tenant_id=tenant_id, updates=updates)
     
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client:
         try:
             supabase_client.table("tenants").update(updates).eq("id", tenant_id).execute()

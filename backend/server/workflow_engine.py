@@ -3,7 +3,7 @@ import datetime
 import structlog
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 logger = structlog.get_logger("workflow_engine")
 

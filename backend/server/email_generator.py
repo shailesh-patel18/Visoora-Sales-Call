@@ -3,7 +3,7 @@ import json
 import httpx
 import structlog
 from typing import Dict, Any
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from pipeline.states import get_tenant_config
 from server.worker import register_job_handler
 from crm.auto_advance import _load_local_json, _save_local_json

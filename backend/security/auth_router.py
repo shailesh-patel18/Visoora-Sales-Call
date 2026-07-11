@@ -68,7 +68,7 @@ async def signup_user(payload: SignupPayload):
     Proxies user registration to Supabase Auth.
     Falls back to local user registry in development/testing mode when offline.
     """
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     
     # Check if Supabase client is active
     if supabase_client:
@@ -150,7 +150,7 @@ async def login_user(payload: AuthPayload):
     Validates credentials against Supabase GoTrue Auth.
     Falls back to local user registry in development/testing mode when offline.
     """
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     
     if supabase_client:
         try:
@@ -229,7 +229,7 @@ async def login_user(payload: AuthPayload):
 @auth_router.post("/logout")
 async def logout_user(user: UserPrincipal = Depends(get_current_user)):
     """Logs out the active user."""
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client and not user.user_id.startswith("local_"):
         try:
             supabase_client.auth.sign_out()
@@ -257,7 +257,7 @@ async def get_me(user: UserPrincipal = Depends(get_current_user)):
 @auth_router.post("/reset-password")
 async def reset_password(payload: ResetPasswordPayload):
     """Triggers password reset flow."""
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client:
         try:
             supabase_client.auth.reset_password_for_email(payload.email)

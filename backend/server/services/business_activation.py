@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from security.rbac import get_current_user, UserPrincipal
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 logger = structlog.get_logger("business_activation")
 

@@ -7,7 +7,7 @@ from urllib.robotparser import RobotFileParser
 from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from server.worker import register_job_handler
 from crm.auto_advance import _load_local_json, _save_local_json
 from ai_platform.agents.research_agent import ResearchAgent
@@ -26,6 +26,12 @@ async def _update_job_status(tenant_id: str, payload: dict, progress: dict, job_
                 current_payload = res.data[0]["payload"]
                 current_payload["progress"] = progress
                 supabase_client.table("workflow_jobs").update({"payload": current_payload}).eq("id", job_id).execute()
+        
+        mission_id = payload.get("mission_id")
+        if mission_id:
+            status = progress.get("stage", "running").lower()
+            supabase_client.table("missions").update({"status": status}).eq("id", mission_id).execute()
+            
     except Exception as e:
         logger.error("failed_to_update_job_status", error=str(e))
 
@@ -75,11 +81,13 @@ async def company_research_job_handler(payload: dict, job_id: str = None) -> dic
         # 2. Fetch target contacts
         max_prospects = payload.get("max_prospects", 5) # Default to 5 for safety in batch
         contacts = []
+        from server.services.prospecting.factory import get_prospect_provider
+        
         try:
-            res = supabase_client.table("contacts").select("*").eq("tenant_id", tenant_uuid).limit(max_prospects).execute()
-            contacts = res.data or []
+            provider = get_prospect_provider()
+            contacts = await provider.search_prospects(tenant_id=tenant_uuid, business_brain=business_brain, max_results=max_prospects)
         except Exception as e:
-            logger.error("failed_to_fetch_contacts_for_mission", error=str(e))
+            logger.error("failed_to_fetch_contacts_from_provider", error=str(e))
             
         if not contacts:
             # Fallback to a single mock contact for demo if DB is empty
@@ -92,47 +100,53 @@ async def company_research_job_handler(payload: dict, job_id: str = None) -> dic
             pct = 20 + int(80 * (i / total_contacts))
             await _update_job_status(tenant_id, payload, {"stage": f"DRAFTING_EMAIL_{i+1}", "pct": pct}, job_id)
             
-            # 3. Research & Draft
-            try:
-                raw_research = await run_company_research(target.get("id"), tenant_uuid)
-                facts = raw_research.get("sourced_facts", [])
-                research_data = "\n".join([f"- {f.get('fact', '')} (Source: {f.get('source', '')})" for f in facts])
-                if not research_data.strip():
-                    research_data = "No verified facts found."
-                
-                email_result = await generation_service.draft_prospecting_email(business_brain, target, research_data)
-                
-                # 4. Save Artifact
-                artifact_record = {
-                    "tenant_id": tenant_uuid,
-                    "type": "EMAIL_DRAFT",
-                    "status": "WAITING_APPROVAL",
-                    "created_by": "Visoora Engine",
-                    "mission_id": mission_name,
-                    "confidence": email_result.get("personalization_score", 92),
-                    "cost_usd": 0.04,
-                    "prospect_name": f"{target.get('first_name', 'John')} {target.get('last_name', '')}".strip(),
-                    "company_name": target.get('company', 'Unknown Company'),
-                    "pain_points": email_result.get("pain_points_addressed", []),
-                    "reason_selected": email_result.get("reason_selected", ""),
-                    "email_subject": email_result.get("email_subject", ""),
-                    "email_body": email_result.get("email_body", ""),
-                    "expected_reply_rate": email_result.get("expected_reply_rate", "10%"),
-                    "expected_meeting_prob": email_result.get("expected_meeting_prob", "2%"),
-                    "metadata": {
-                        "personalization_score": email_result.get("personalization_score", 92),
-                        "business_brain_match": email_result.get("business_brain_match", 90),
-                        "spam_risk": email_result.get("spam_risk", "Low"),
-                        "versions": [],
-                        "alternatives": []
+            # 3. Research & Draft (With Retry Logic)
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    raw_research = await run_company_research(target.get("id"), tenant_uuid, contact_data=target)
+                    facts = raw_research.get("sourced_facts", [])
+                    research_data = "\n".join([f"- {f.get('fact', '')} (Source: {f.get('source', '')})" for f in facts])
+                    if not research_data.strip():
+                        research_data = "No verified facts found."
+                    
+                    email_result = await generation_service.draft_prospecting_email(business_brain, target, research_data)
+                    
+                    # 4. Save Artifact
+                    artifact_record = {
+                        "tenant_id": tenant_uuid,
+                        "type": "EMAIL_DRAFT",
+                        "status": "WAITING_APPROVAL",
+                        "created_by": "Visoora Engine",
+                        "mission_id": mission_name,
+                        "confidence": email_result.get("personalization_score", 92),
+                        "cost_usd": 0.04,
+                        "prospect_name": f"{target.get('first_name', 'John')} {target.get('last_name', '')}".strip(),
+                        "company_name": target.get('company', 'Unknown Company'),
+                        "pain_points": email_result.get("pain_points_addressed", []),
+                        "reason_selected": email_result.get("reason_selected", ""),
+                        "email_subject": email_result.get("email_subject", ""),
+                        "email_body": email_result.get("email_body", ""),
+                        "expected_reply_rate": email_result.get("expected_reply_rate", "10%"),
+                        "expected_meeting_prob": email_result.get("expected_meeting_prob", "2%"),
+                        "metadata": {
+                            "personalization_score": email_result.get("personalization_score", 92),
+                            "business_brain_match": email_result.get("business_brain_match", 90),
+                            "spam_risk": email_result.get("spam_risk", "Low"),
+                            "versions": [],
+                            "alternatives": []
+                        }
                     }
-                }
-                
-                supabase_client.table("mission_artifacts").insert(artifact_record).execute()
-                
-            except Exception as draft_err:
-                logger.error("drafting_failed_for_target", target=target.get("id"), error=str(draft_err))
-                continue
+                    
+                    supabase_client.table("mission_artifacts").insert(artifact_record).execute()
+                    break # Success, exit retry loop
+                    
+                except Exception as draft_err:
+                    logger.warn("drafting_failed_for_target", target=target.get("id"), attempt=attempt+1, error=str(draft_err))
+                    if attempt == max_attempts - 1:
+                        logger.error("drafting_completely_failed_for_target", target=target.get("id"))
+                    else:
+                        await asyncio.sleep(2 * (attempt + 1)) # Exponential backoff
                 
         await _update_job_status(tenant_id, payload, {"stage": "HUMAN_APPROVAL", "pct": 100}, job_id)
         
@@ -183,14 +197,14 @@ async def check_robots_txt_allows(url: str, user_agent: str = "*") -> bool:
         return True
     return True
 
-async def run_company_research(contact_id: str, tenant_id: str) -> dict:
+async def run_company_research(contact_id: str, tenant_id: str, contact_data: dict = None) -> dict:
     """
     Performs safe company research respecting robots.txt.
     Structures data separating Sourced Facts from AI Estimates.
     """
     # 1. Fetch contact
-    contact = None
-    if supabase_client:
+    contact = contact_data
+    if not contact and supabase_client:
         try:
             try:
                 res = supabase_client.table("contacts").select("*").eq("id", contact_id).execute()

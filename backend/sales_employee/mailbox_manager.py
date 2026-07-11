@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 import httpx
 import structlog
 from sales_employee.services import store, require_tenant_id, utc_now
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from security.encryption import encrypt_value, decrypt_value
 
 logger = structlog.get_logger("visoora_mailbox_manager")

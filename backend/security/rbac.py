@@ -22,6 +22,7 @@ class UserPrincipal(BaseModel):
     role: str = Field(..., description="Assigned RBAC access privileges: admin, agent, or viewer.")
     tenant_id: str = Field(..., description="Assigned multi-tenant isolation context.")
     is_m2m: bool = Field(default=False, description="Flag indicating if the call is machine-to-machine.")
+    raw_token: Optional[str] = Field(default=None, description="The raw JWT token used for authentication.")
 
 async def get_current_user(
     request: Request,
@@ -43,7 +44,8 @@ async def get_current_user(
                 email="system@visoora.m2m",
                 role="admin",
                 tenant_id="global_system_tenant",
-                is_m2m=True
+                is_m2m=True,
+                raw_token=None
             )
             logger.info("m2m_auth_success", message="Authenticated via system M2M API Key.", tenant_id=user_principal.tenant_id)
         else:
@@ -89,7 +91,8 @@ async def get_current_user(
             email=email,
             role=role,
             tenant_id=tenant_id,
-            is_m2m=False
+            is_m2m=False,
+            raw_token=token
         )
         
     else:

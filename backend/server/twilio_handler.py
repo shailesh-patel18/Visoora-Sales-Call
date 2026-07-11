@@ -15,7 +15,7 @@ import datetime
 import uuid
 import time
 import traceback
-from fastapi import FastAPI, WebSocket, Request, Response, APIRouter, Depends, HTTPException, Security
+from fastapi import FastAPI, WebSocket, Request, Response, APIRouter, Depends, HTTPException, Security, Form
 from fastapi.responses import HTMLResponse, JSONResponse
 from typing import Dict, Optional, List, Any
 from html import escape
@@ -577,7 +577,7 @@ async def exception_tracing_middleware(request: Request, call_next):
             # Fast unverified parse to extract log context
             import jwt
             payload = jwt.decode(token, options={"verify_signature": False})
-            tenant_id = payload.get("tenant_id") or payload.get("email", "").split("@")[-1] or "default"
+            tenant_id = payload.get("tenant_id") or "default"
         except Exception:
             pass
     tenant_id_var.set(tenant_id)
@@ -648,7 +648,7 @@ async def handle_incoming_call(request: Request, verified: bool = Depends(verify
     # Phase 4: Check if a conversation plan exists in Supabase
     conversation_plan_json = "{}"
     if task_id:
-        from server.storage_manager import supabase_client
+        from server.storage_manager import supabase_admin_client as supabase_client
         if supabase_client:
             try:
                 from server.onboarding_api import resolve_tenant_uuid
@@ -705,7 +705,14 @@ async def handle_incoming_call(request: Request, verified: bool = Depends(verify
     return Response(content=twiml, media_type="application/xml")
 
 @app.post("/api/twilio-status-callback")
-async def handle_twilio_status_callback(request: Request, verified: bool = Depends(verify_twilio_signature)):
+async def handle_twilio_status_callback(
+    request: Request, 
+    verified: bool = Depends(verify_twilio_signature),
+    CallSid: str = Form(None),
+    CallStatus: str = Form(None),
+    CallDuration: str = Form("0"),
+    To: str = Form(None)
+):
     """
     Twilio Call Status Webhook.
     Protected by X-Twilio-Signature verification middleware.
@@ -713,10 +720,10 @@ async def handle_twilio_status_callback(request: Request, verified: bool = Depen
     try:
         task_id = request.query_params.get("task_id")
         mission_id = request.query_params.get("mission_id")
-        form_data = await request.form()
-        call_sid = form_data.get("CallSid")
-        call_status = form_data.get("CallStatus")
-        duration = form_data.get("CallDuration") or "0"
+        
+        call_sid = CallSid
+        call_status = CallStatus
+        duration = CallDuration
         
         log_info("twilio_status_callback", f"Twilio Status Update: {call_status}", call_sid=call_sid, call_status=call_status, call_duration=duration, task_id=task_id)
         
@@ -726,7 +733,7 @@ async def handle_twilio_status_callback(request: Request, verified: bool = Depen
             emit_mission_event(mission_id, f"call_{call_status}", task_id, {"call_sid": call_sid, "duration": duration})
             
             if call_status in ["completed", "failed", "busy", "no-answer", "canceled"]:
-                from server.storage_manager import supabase_client
+                from server.storage_manager import supabase_admin_client as supabase_client
                 if supabase_client:
                     # Update Voice Task Status
                     task_status = "success" if call_status == "completed" else "failed"
@@ -1803,7 +1810,7 @@ async def handle_media_stream(websocket: WebSocket):
                 
                 # Check if we should block Supabase
                 if not use_supabase:
-                    from server.storage_manager import supabase_client
+                    from server.storage_manager import supabase_admin_client as supabase_client
                     # Temporarily clear Supabase client to force fallback upload path
                     original_client = supabase_client
                     try:
@@ -2272,7 +2279,7 @@ async def get_call_logs(user: UserPrincipal = Depends(RoleChecker(["viewer", "ag
     """
     Returns call logs telemetry from Supabase, cascading to local JSON registry if unconfigured.
     """
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     if supabase_client:
         try:
             res = supabase_client.table("call_logs").select("*").eq("tenant_id", user.tenant_id).order("created_at", desc=True).execute()

@@ -46,15 +46,12 @@ async def approve_draft(draft_id: str, user: UserPrincipal = Depends(RoleChecker
     draft.status = DraftStatus.APPROVED
     await draft_repository.save(draft)
     
-    # In a real app, this would be a Celery task: send_email.delay(draft.id)
-    # For now, we will just simulate the notification provider sending it.
-    # Note: We need a recipient. We'll use a dummy one for the mockup.
-    recipient = "prospect@example.com" 
-    await notification_provider.notify(
-        user_id=user.user_id,
-        recipient=recipient,
-        template="outbound_email",
-        data={"subject": draft.subject, "html": draft.body}
+    # Dispatch the job
+    from server.worker import enqueue_background_job
+    await enqueue_background_job(
+        tenant_id=user.tenant_id,
+        job_type="email_dispatch",
+        payload={"artifact_id": draft_id} # draft_id is effectively the artifact id
     )
     
     draft.status = DraftStatus.SENT

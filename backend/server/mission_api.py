@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Dict, Any
 from security.rbac import get_current_user, UserPrincipal
-from server.storage_manager import supabase_client
+from server.storage_manager import get_scoped_supabase_client
 from server.services.mission_engine import create_mission
-from ai_platform.agents.planning_agent import PlanningAgent
+from server.worker import enqueue_background_job
 
 mission_router = APIRouter(prefix="/api/missions", tags=["Missions"], dependencies=[Depends(get_current_user)])
 
@@ -18,11 +18,12 @@ async def start_mission(payload: CreateMissionRequest, user: UserPrincipal = Dep
     """
     Creates a new Mission and uses the Planning Agent to generate its DAG.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         raise HTTPException(status_code=500, detail="Database not configured")
 
     # Verify the brain belongs to the user
-    res = supabase_client.table("business_brains").select("*").eq("id", payload.business_brain_id).execute()
+    res = scoped_db.table("business_brains").select("*").eq("id", payload.business_brain_id).execute()
     if not res.data or res.data[0].get("tenant_id") != user.tenant_id:
         raise HTTPException(status_code=403, detail="Not authorized for this Business Brain")
 
@@ -36,21 +37,29 @@ async def start_mission(payload: CreateMissionRequest, user: UserPrincipal = Dep
         goal=payload.goal
     )
     
-    # Use planning agent to build execution DAG
-    planner = PlanningAgent(tenant_id=user.tenant_id)
-    await planner.generate_mission_plan(mission.id, payload.goal, brain)
+    # Enqueue planning job to be handled by background workers
+    await enqueue_background_job(
+        tenant_id=user.tenant_id,
+        job_type="mission_planning",
+        payload={
+            "mission_id": mission.id,
+            "goal": payload.goal,
+            "business_brain": brain
+        }
+    )
     
-    return {"success": True, "mission_id": mission.id}
+    return {"success": True, "mission_id": mission.id, "status": "planning_queued"}
 
 @mission_router.get("")
 async def list_missions(user: UserPrincipal = Depends(get_current_user)):
     """
     Returns active/completed missions for the dashboard.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         return []
         
-    res = supabase_client.table("missions").select("*").eq("tenant_id", user.tenant_id).order("created_at", desc=True).execute()
+    res = scoped_db.table("missions").select("*").eq("tenant_id", user.tenant_id).order("created_at", desc=True).execute()
     return res.data or []
 
 @mission_router.get("/{mission_id}/tasks")
@@ -58,25 +67,27 @@ async def get_mission_tasks(mission_id: str, user: UserPrincipal = Depends(get_c
     """
     Returns the execution DAG tasks for a specific mission to render the tree UI.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         return []
         
-    res = supabase_client.table("mission_tasks").select("*").eq("mission_id", mission_id).execute()
+    res = scoped_db.table("mission_tasks").select("*").eq("mission_id", mission_id).execute()
     return res.data or []
 
 @mission_router.get("/{mission_id}/events")
 async def get_mission_events(mission_id: str, user: UserPrincipal = Depends(get_current_user)):
     """Fetch events for a specific mission to populate the replay timeline."""
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         return {"events": []}
     
     tenant_id = user.tenant_id
     
     try:
         # First verify mission belongs to tenant
-        m_res = supabase_client.table("missions").select("id").eq("id", mission_id).eq("tenant_id", tenant_id).execute()
+        m_res = scoped_db.table("missions").select("id").eq("id", mission_id).eq("tenant_id", tenant_id).execute()
         if m_res.data:
-            res = supabase_client.table("mission_events").select("*").eq("mission_id", mission_id).order("created_at", desc=False).execute()
+            res = scoped_db.table("mission_events").select("*").eq("mission_id", mission_id).order("created_at", desc=False).execute()
             if res.data:
                 return {"events": res.data}
     except Exception:
@@ -108,10 +119,11 @@ async def approve_mission_task(task_id: str, user: UserPrincipal = Depends(get_c
     """
     Approves a task in WAITING_APPROVAL state. If it's a voice task, launches the ConversationEngine.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         raise HTTPException(status_code=500, detail="Database not configured")
         
-    res = supabase_client.table("mission_tasks").select("*, missions!inner(tenant_id, id)").eq("id", task_id).execute()
+    res = scoped_db.table("mission_tasks").select("*, missions!inner(tenant_id, id)").eq("id", task_id).execute()
     if not res.data:
         raise HTTPException(status_code=404, detail="Task not found")
         
@@ -125,7 +137,7 @@ async def approve_mission_task(task_id: str, user: UserPrincipal = Depends(get_c
         raise HTTPException(status_code=400, detail="Task is not waiting for approval")
         
     # Update Status
-    supabase_client.table("mission_tasks").update({"status": "running"}).eq("id", task_id).execute()
+    scoped_db.table("mission_tasks").update({"status": "running"}).eq("id", task_id).execute()
     
     # If Voice Task, Trigger Conversation Engine
     if task_data.get("agent_type") == "voice_agent":
@@ -135,7 +147,7 @@ async def approve_mission_task(task_id: str, user: UserPrincipal = Depends(get_c
         artifact_id = task_data.get("result_artifact_id")
         conversation_plan = {}
         if artifact_id:
-            art_res = supabase_client.table("mission_artifacts").select("content").eq("id", artifact_id).execute()
+            art_res = scoped_db.table("mission_artifacts").select("content").eq("id", artifact_id).execute()
             if art_res.data:
                 conversation_plan = art_res.data[0].get("content", {})
                 
@@ -159,10 +171,11 @@ async def get_agent_inbox(user: UserPrincipal = Depends(get_current_user)):
     Phase 5: Fetches all tasks across all missions waiting for human approval, 
     joined with their generated artifacts.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         return []
         
-    res = supabase_client.table("mission_tasks").select(
+    res = scoped_db.table("mission_tasks").select(
         "id, name, agent_type, status, payload, created_at, missions!inner(tenant_id, id, goal), mission_artifacts(id, content, type)"
     ).eq("missions.tenant_id", user.tenant_id).eq("status", "waiting_approval").execute()
     
@@ -177,11 +190,12 @@ async def edit_task_artifact(task_id: str, payload: EditArtifactRequest, user: U
     Phase 5: Allows a user to edit an artifact (Email/Voice Plan) before approval.
     Implements basic version tracking by appending to a history array if needed.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         raise HTTPException(status_code=500)
         
     # Get task to find artifact_id
-    res = supabase_client.table("mission_tasks").select("result_artifact_id, missions!inner(tenant_id)").eq("id", task_id).execute()
+    res = scoped_db.table("mission_tasks").select("result_artifact_id, missions!inner(tenant_id)").eq("id", task_id).execute()
     if not res.data or res.data[0]["missions"]["tenant_id"] != user.tenant_id:
         raise HTTPException(status_code=404)
         
@@ -190,7 +204,7 @@ async def edit_task_artifact(task_id: str, payload: EditArtifactRequest, user: U
         raise HTTPException(status_code=400, detail="No artifact found for this task")
         
     # Update Artifact content
-    supabase_client.table("mission_artifacts").update({"content": payload.content}).eq("id", artifact_id).execute()
+    scoped_db.table("mission_artifacts").update({"content": payload.content}).eq("id", artifact_id).execute()
     return {"success": True}
 
 class RejectArtifactRequest(BaseModel):
@@ -202,14 +216,15 @@ async def reject_mission_task(task_id: str, payload: RejectArtifactRequest, user
     """
     Phase 5: Rejects a task and provides structured feedback for the agent to retry.
     """
-    if not supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if not scoped_db:
         raise HTTPException(status_code=500)
         
-    res = supabase_client.table("mission_tasks").select("missions!inner(tenant_id)").eq("id", task_id).execute()
+    res = scoped_db.table("mission_tasks").select("missions!inner(tenant_id)").eq("id", task_id).execute()
     if not res.data or res.data[0]["missions"]["tenant_id"] != user.tenant_id:
         raise HTTPException(status_code=404)
         
     # Reset status to pending to force the engine to pick it up again, 
     # or handle retry logic in the engine. For now, mark as rejected.
-    supabase_client.table("mission_tasks").update({"status": "rejected", "error_log": payload.feedback}).eq("id", task_id).execute()
+    scoped_db.table("mission_tasks").update({"status": "rejected", "error_log": payload.feedback}).eq("id", task_id).execute()
     return {"success": True, "status": "rejected"}

@@ -18,7 +18,8 @@ class BaseProvider(ABC):
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         pass
 
@@ -28,6 +29,7 @@ class BaseProvider(ABC):
         prompt: str,
         schema: Any,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         pass

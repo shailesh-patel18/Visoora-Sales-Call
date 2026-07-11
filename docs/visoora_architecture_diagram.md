@@ -10,94 +10,91 @@ graph TD
     classDef agent fill:#00F0FF,stroke:#000,stroke-width:2px,color:#000,font-weight:bold;
     classDef database fill:#ffb347,stroke:#333,stroke-width:2px,color:#000;
     classDef external fill:#b19cd9,stroke:#333,stroke-width:2px,color:#000;
-    classDef auth fill:#ff69b4,stroke:#333,stroke-width:2px,color:#000;
+    classDef trust fill:#ff69b4,stroke:#333,stroke-width:2px,color:#000,font-weight:bold;
 
     %% 1. FRONTEND
-    subgraph Frontend [Frontend: Next.js + Tailwind + Framer Motion]
-        Landing[Landing Page]:::frontend
+    subgraph Frontend [Frontend: Next.js + Tailwind]
         Login[Supabase Auth UI]:::frontend
-        Onboarding[Onboarding: Business Brain]:::frontend
-        Dashboard[Command Center]:::frontend
+        Dashboard[ROI Dashboard]:::frontend
         Creator[Mission Creator]:::frontend
-        Cockpit[Approval Cockpit]:::frontend
+        Cockpit[Approval Cockpit & Mission Replay]:::trust
     end
 
-    %% 2. BACKEND (FASTAPI)
+    %% 2. BACKEND
     subgraph Backend [Backend: Python FastAPI]
-        AuthGuard[RBAC & Tenant Isolation]:::backend
         API_Gateway[API Router]:::backend
         JobEngine[Background Worker Engine]:::backend
-        Followup[Cron: Follow-up Engine]:::backend
+        Deliverability[Deliverability Center]:::backend
+        Compliance[Compliance Layer]:::backend
     end
 
     %% 3. DATABASES
     subgraph Databases [Data Storage]
-        DB[(Supabase PostgreSQL)]:::database
-        Redis[(Redis Task Queue & Cache)]:::database
-        VectorDB[(Vector DB: RAG Memory)]:::database
+        DB[(Supabase: Relational)]:::database
+        Redis[(Redis: Queue)]:::database
+        VectorDB[(Business Brain: RAG Memory)]:::database
     end
 
     %% 4. AI AGENT SWARM
-    subgraph Agents [The Autonomous AI Agent Swarm]
-        Planner[Planning Agent]:::agent
-        Prospector[Prospecting Agent]:::agent
-        Researcher[Research Agent]:::agent
-        Scorer[Lead Scoring Engine]:::agent
-        Writer[Email Generator Agent]:::agent
+    subgraph Agents [Transparent AI Agent Swarm]
+        Planner[Planning & CRM Memory Agent]:::agent
+        Prospector[Prospecting & Research Agent]:::agent
+        Scorer[Lead Scoring & Evidence Engine]:::agent
+        Writer[Drafting & Confidence Agent]:::agent
     end
 
     %% 5. EXTERNAL APIs
     subgraph External [Third-Party Integrations]
-        Firecrawl[Firecrawl Website Scraper]:::external
-        LLM[Claude 3.5 Sonnet / OpenAI]:::external
-        Apollo[Apollo.io / ZoomInfo API]:::external
-        Perplexity[Perplexity / Tavily API]:::external
-        Nylas[Nylas / SMTP Email Dispatch]:::external
+        CRM[CRM: Salesforce / HubSpot]:::external
+        Scraper[Firecrawl / Tavily]:::external
+        LLM[Claude 3.5 Sonnet]:::external
+        Data[Apollo.io / ZoomInfo]:::external
+        EmailProvider[Nylas / SMTP]:::external
     end
 
     %% -- FLOW LOGIC --
 
-    %% Auth Flow
-    Landing --> Login
-    Login <-->|JWT Tokens| AuthGuard
-    
-    %% Onboarding Flow
-    Login --> Onboarding
-    Onboarding -->|URL| Firecrawl
-    Firecrawl -->|Scraped Content| LLM
-    LLM -->|Extracts Value Prop| DB
+    %% CRM Sync & Business Brain
+    Login --> Dashboard
+    CRM <-->|Bi-directional Sync| Backend
+    Backend -->|Initialize Memory| VectorDB
 
     %% Mission Launch Flow
-    Onboarding --> Dashboard
     Dashboard --> Creator
     Creator -->|POST /mission/launch| API_Gateway
-    API_Gateway --> AuthGuard
     API_Gateway -->|Enqueue Task| Redis
     Redis --> JobEngine
 
     %% Agent Swarm Flow (Triggered by Worker)
     JobEngine --> Planner
+    Planner <-->|Check for Existing Cust| CRM
     Planner --> Prospector
-    Prospector <-->|Search ICP| Apollo
-    Prospector --> Researcher
-    Researcher <-->|Deep Web Search| Perplexity
-    Researcher --> Scorer
-    Scorer <-->|Checks against Business Brain| DB
-    Scorer -->|Rejects Bad Leads| DB
-    Scorer -->|Passes Good Leads| Writer
+    Prospector <-->|Search ICP| Data
+    Prospector <-->|Deep Web Search| Scraper
+    Prospector --> Scorer
+    Scorer <-->|Checks against Business Brain| VectorDB
+    Scorer -->|Passes Good Leads| Compliance
+    
+    %% Trust Layer Pre-Check
+    Compliance <-->|Checks Suppression Lists| DB
+    Compliance --> Deliverability
+    Deliverability -->|Checks Domain Health| Writer
+
+    %% Drafting
     Writer <-->|Fetch Tone of Voice| VectorDB
     Writer <-->|Prompting| LLM
-    Writer -->|Saves Draft| DB
+    Writer -->|Saves Draft & Evidence| DB
 
-    %% Human in the Loop
+    %% Human Governance
     DB -->|WAITING_APPROVAL| Cockpit
-    Cockpit -->|User Edits| VectorDB
+    Cockpit -->|User Edits / Diff| VectorDB
     Cockpit -->|User Approves| DB
 
-    %% Dispatch
-    Followup -->|Reads QUEUED emails| DB
-    DB -->|Passes Payload| Nylas
-    Nylas -->|Delivers Email| Prospect((Prospect))
-    Prospect -->|Replies| Nylas
-    Nylas -->|Webhook| Backend
+    %% Dispatch & Loop
+    Deliverability -->|Reads QUEUED emails| DB
+    DB -->|Passes Payload| EmailProvider
+    EmailProvider -->|Delivers Email| Prospect((Prospect))
+    Prospect -->|Replies/Bounces| EmailProvider
+    EmailProvider -->|Webhook| Backend
+    Backend -->|Log Outcome| CRM
 ```

@@ -42,13 +42,16 @@ class GeminiProvider(BaseProvider):
         self,
         prompt: str,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         model_name = self._determine_model(capabilities or [])
         
         config_kwargs = {}
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
+        if max_tokens:
+            config_kwargs["max_output_tokens"] = max_tokens
             
         start_time = time.time()
         
@@ -76,7 +79,8 @@ class GeminiProvider(BaseProvider):
         prompt: str,
         schema: Any,
         system_instruction: Optional[str] = None,
-        capabilities: Optional[List[Capability]] = None
+        capabilities: Optional[List[Capability]] = None,
+        max_tokens: Optional[int] = None
     ) -> ProviderResponse:
         model_name = self._determine_model(capabilities or [])
         
@@ -88,6 +92,8 @@ class GeminiProvider(BaseProvider):
             "response_mime_type": "application/json",
             "system_instruction": enhanced_instruction
         }
+        if max_tokens:
+            config_kwargs["max_output_tokens"] = max_tokens
             
         start_time = time.time()
         

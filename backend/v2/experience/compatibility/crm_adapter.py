@@ -1,7 +1,7 @@
 from typing import List
 import structlog
 from v2.domain.crm.models import Lead, LeadStatus
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 logger = structlog.get_logger("legacy_crm_adapter")
 

@@ -17,7 +17,7 @@ class CallStateContext(BaseModel):
     conversation_plan: Optional[Dict] = None # Phase 4 dynamic plan injection
 
 def get_tenant_config(tenant_id: str) -> dict:
-    from server.storage_manager import supabase_client
+    from server.storage_manager import supabase_admin_client as supabase_client
     
     # 1. Resolve UUID
     try:

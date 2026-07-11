@@ -2,7 +2,7 @@ import structlog
 import uuid
 import datetime
 from typing import Dict, Any, Optional
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 from server.services.mission_engine import emit_mission_event
 
 logger = structlog.get_logger("conversation_engine")

@@ -9,7 +9,8 @@ logger = structlog.get_logger("visoora_resend")
 class ResendProvider(NotificationProvider):
     def __init__(self):
         resend.api_key = settings.resend_api_key
-        self.from_email = "notifications@visoora.com" # Should be configured via env
+        import os
+        self.from_email = os.getenv("RESEND_FROM_EMAIL", "notifications@visoora.com")
         
     async def notify(self, user_id: str, recipient: str, template: str, data: Dict[str, Any]) -> bool:
         """
@@ -29,5 +30,15 @@ class ResendProvider(NotificationProvider):
             logger.info("resend_email_sent", user_id=user_id, recipient=recipient, resend_id=r.get("id"))
             return True
         except Exception as e:
-            logger.error("resend_email_failed", error=str(e), user_id=user_id, recipient=recipient)
+            error_msg = str(e)
+            if "validation_error" in error_msg.lower() or "not authorized" in error_msg.lower() or "domain" in error_msg.lower():
+                logger.error(
+                    "resend_email_domain_verification_error",
+                    error=error_msg,
+                    user_id=user_id,
+                    recipient=recipient,
+                    hint="Ensure your RESEND_FROM_EMAIL domain is verified in the Resend dashboard, or use onboarding@resend.dev to send to your verified email address."
+                )
+            else:
+                logger.error("resend_email_failed", error=error_msg, user_id=user_id, recipient=recipient)
             return False

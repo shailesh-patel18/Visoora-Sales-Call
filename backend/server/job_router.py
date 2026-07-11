@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Depends, status, Header
 from pydantic import BaseModel, Field
 import structlog
-from server.storage_manager import supabase_client
+from server.storage_manager import get_scoped_supabase_client
 from security.rbac import get_current_user, UserPrincipal
 from security.config import settings
 from crm.auto_advance import _load_local_json, _save_local_json
@@ -59,9 +59,10 @@ async def create_job(
         "updated_at": now
     }
 
-    if supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if scoped_db:
         try:
-            res = supabase_client.table("background_jobs").insert(job_data).execute()
+            res = scoped_db.table("background_jobs").insert(job_data).execute()
             if res.data:
                 logger.info("job_enqueued_db", job_id=job_id, job_type=payload.job_type, tenant_id=tenant_id)
                 return res.data[0]
@@ -86,9 +87,10 @@ async def get_job(
     user: UserPrincipal = Depends(get_current_user)
 ):
     """Retrieves current job status, results, and error details."""
-    if supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if scoped_db:
         try:
-            res = supabase_client.table("background_jobs")\
+            res = scoped_db.table("background_jobs")\
                 .select("*")\
                 .eq("id", job_id)\
                 .execute()
@@ -131,11 +133,12 @@ async def list_jobs(
             detail="Forbidden: Tenant context mismatch."
         )
 
-    if supabase_client:
+    scoped_db = get_scoped_supabase_client(user.raw_token)
+    if scoped_db:
         try:
-            res = supabase_client.table("background_jobs")\
+            res = scoped_db.table("background_jobs")\
                 .select("*")\
-                .eq("tenant_id", tenant_id)\
+                .eq("tenant_id", user.tenant_id)\
                 .order("created_at", desc=True)\
                 .execute()
             return res.data or []

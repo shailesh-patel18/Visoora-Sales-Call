@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from security.errors import SecurityException
 from security.rbac import get_current_user, RoleChecker, UserPrincipal
 from security.logging import logger
-from server.storage_manager import supabase_client
+from server.storage_manager import supabase_admin_client as supabase_client
 
 # Define compliance router
 compliance_router = APIRouter(prefix="/compliance", tags=["Compliance"])

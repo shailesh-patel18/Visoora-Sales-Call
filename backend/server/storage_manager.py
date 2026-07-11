@@ -7,7 +7,7 @@ import struct
 import asyncio
 import json
 from typing import Dict, Tuple, Optional, List
-from supabase import create_client, Client
+from supabase import create_client, Client, ClientOptions
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -16,9 +16,10 @@ load_dotenv()
 # ----------------------------------------------------
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
 # Initialize client only if variables are loaded to avoid startup crashes
-supabase_client: Optional[Client] = None
+supabase_admin_client: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
     try:
         import httpx
@@ -34,14 +35,25 @@ if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
             is_reachable = False
 
         if is_reachable:
-            supabase_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-            print("[Storage Manager] Supabase Client Initialized Successfully.")
+            supabase_admin_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+            print("[Storage Manager] Supabase Admin Client Initialized Successfully.")
         else:
             print("[Storage Manager] Supabase is offline. Local recording storage active.")
     except Exception as e:
         print(f"[Storage Manager] Error initializing Supabase: {e}")
 else:
     print("[Storage Manager] Supabase credentials not found. Local recording storage active.")
+
+def get_scoped_supabase_client(raw_token: str) -> Optional[Client]:
+    """
+    Creates a new Supabase client scoped to the authenticated user's JWT.
+    This naturally enforces Row-Level Security (RLS) on all queries.
+    """
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        print("[Storage Manager] Warning: SUPABASE_URL or SUPABASE_ANON_KEY is missing. Cannot create scoped client.")
+        return None
+    options = ClientOptions(headers={"Authorization": f"Bearer {raw_token}"})
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=options)
 
 # ----------------------------------------------------
 # THREAD-SAFE STEREO CALL RECORDER SYSTEM
@@ -128,7 +140,7 @@ class CallSessionTracker:
         DEFAULT_TENANT_IDS = {"default_tenant", "default_shared_tenant", ""}
         is_default_tenant = tenant_id.strip() in DEFAULT_TENANT_IDS
 
-        if supabase_client and is_default_tenant:
+        if supabase_admin_client and is_default_tenant:
             print(
                 f"[Storage Manager] CRITICAL: upload_recording called with default/empty tenant_id "
                 f"('{tenant_id}') while Supabase is configured. "
@@ -141,19 +153,19 @@ class CallSessionTracker:
             quarantine_tenant = None  # Use the provided tenant_id normally
 
         # 2. Resilient DB & Bucket uploads
-        if supabase_client:
+        if supabase_admin_client:
             try:
                 # Use quarantine bucket for default/unknown tenants to prevent cross-tenant mixing
                 effective_tenant = quarantine_tenant if quarantine_tenant else tenant_id
                 bucket_name = f"recordings-{effective_tenant}"
-                res = supabase_client.storage.from_(bucket_name).upload(
+                res = supabase_admin_client.storage.from_(bucket_name).upload(
                     path=filename,
                     file=wav_data,
                     file_options={"content-type": "audio/wav"}
                 )
                 
                 # Fetch public bucket URL
-                public_url = supabase_client.storage.from_(bucket_name).get_public_url(filename)
+                public_url = supabase_admin_client.storage.from_(bucket_name).get_public_url(filename)
                 
                 # Insert telemetry row into call_logs table
                 # CRITICAL: tenant_id MUST be included so Supabase RLS policies
@@ -170,7 +182,7 @@ class CallSessionTracker:
                     "transcript": safe_transcript
                 }
                 
-                db_res = supabase_client.table("call_logs").insert(log_data).execute()
+                db_res = supabase_admin_client.table("call_logs").insert(log_data).execute()
                 print(f"[Storage Manager] Supabase upload & DB insertion success. Public URL: {public_url}")
                 return public_url
                 
