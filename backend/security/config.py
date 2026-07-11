@@ -68,8 +68,8 @@ class SecuritySettings(BaseModel):
             errors.append("TWILIO_ACCOUNT_SID must be configured in production.")
         if not os.getenv("TWILIO_TRIAL_NUMBER"):
             errors.append("TWILIO_TRIAL_NUMBER must be configured in production.")
-        if not self.redis_url:
-            errors.append("REDIS_URL is required in production for rate limiting and session routing.")
+        if not self.redis_url and not os.getenv("UPSTASH_REDIS_REST_URL"):
+            errors.append("REDIS_URL or UPSTASH_REDIS_REST_URL is required in production for rate limiting and session routing.")
         if not self.supabase_url:
             errors.append("SUPABASE_URL is required in production for authenticated dashboard access.")
         if not self.system_api_keys:
