@@ -5,13 +5,23 @@ import { BACKEND_URL } from "../config";
 import { getAuthHeaders } from "../auth/store";
 import { 
   BrainCircuit, GitCommit, GitPullRequest, Search, CheckCircle2, 
-  Target, Users, Zap, ShieldAlert, FileText, ChevronDown, Plus 
+  Target, Users, Zap, ShieldAlert, FileText, ChevronDown, Plus, ArrowRight 
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useCRMStore } from "../store";
+import { useRouter } from "next/navigation";
 
 export default function BusinessBrainPage() {
   const [activeTab, setActiveTab] = useState<"knowledge" | "memory">("knowledge");
   const [brainData, setBrainData] = useState<any>(null);
+  const router = useRouter();
+  const { markStepComplete, setWorkflowStep } = useCRMStore();
+
+  const handleNextStep = () => {
+    markStepComplete(2);
+    setWorkflowStep(3);
+    router.push("/playbooks");
+  };
 
   useEffect(() => {
     async function loadBrain() {
@@ -244,6 +254,17 @@ export default function BusinessBrainPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Next Step Progression */}
+      <div className="flex justify-end pt-8 mt-8 border-t border-[hsl(var(--border-subtle))]">
+        <button 
+          onClick={handleNextStep}
+          className="px-8 py-3 bg-gradient-to-r from-[#00F0FF] to-[#0080FF] text-white font-bold rounded-xl shadow-[0_0_20px_rgba(0,240,255,0.3)] hover:shadow-[0_0_30px_rgba(0,240,255,0.5)] transition-all flex items-center gap-2"
+        >
+          Continue to Playbooks
+          <ArrowRight className="w-5 h-5" />
+        </button>
+      </div>
     </div>
   );
 }

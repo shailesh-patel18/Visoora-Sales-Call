@@ -28,6 +28,7 @@ try:
     import server.lead_scorer
     import server.company_research
     import server.email_generator
+    import server.email_dispatcher
 except ImportError as imp_err:
     logger.warn("worker_handlers_lazy_import_warning", error=str(imp_err))
 
@@ -54,6 +55,17 @@ async def process_next_job():
             workflow_type = job["workflow_type"]
             payload = job["payload"] or {}
             tenant_id = job["tenant_id"]
+
+            # TENANT ISOLATION GUARD: Reject jobs without a valid tenant context
+            if not tenant_id or tenant_id == "":
+                logger.error("job_rejected_no_tenant", job_id=job_id, workflow_type=workflow_type)
+                supabase_admin_client.table("workflow_jobs")\
+                    .update({"status": "failed", "error": "Missing tenant_id — rejected for safety"})\
+                    .eq("id", job_id).execute()
+                return
+
+            # Inject tenant_id into payload so handlers always have it
+            payload["tenant_id"] = tenant_id
 
             # 2. Claim job atomically using optimistic lock
             claim_res = supabase_admin_client.table("workflow_jobs")\
@@ -144,7 +156,7 @@ async def enqueue_background_job(tenant_id: str, job_type: str, payload: dict) -
     job_data = {
         "id": job_id,
         "tenant_id": tenant_id,
-        "job_type": job_type,
+        "workflow_type": job_type,
         "status": "queued",
         "payload": payload,
         "result": {},
@@ -155,9 +167,9 @@ async def enqueue_background_job(tenant_id: str, job_type: str, payload: dict) -
 
     if supabase_admin_client:
         try:
-            res = supabase_admin_client.table("background_jobs").insert(job_data).execute()
+            res = supabase_admin_client.table("workflow_jobs").insert(job_data).execute()
             if res.data:
-                logger.info("job_enqueued_programmatic_db", job_id=job_id, job_type=job_type, tenant_id=tenant_id)
+                logger.info("job_enqueued_programmatic_db", job_id=job_id, workflow_type=job_type, tenant_id=tenant_id)
                 return res.data[0]
         except Exception as e:
             logger.error("programmatic_enqueue_job_db_failed", error=str(e))

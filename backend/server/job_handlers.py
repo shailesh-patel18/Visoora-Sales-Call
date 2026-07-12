@@ -82,7 +82,8 @@ async def website_analysis_handler(payload: dict, job_id: str) -> dict:
     update_job_step(job_id, "business_understanding", "running")
     
     try:
-        agent = ResearchAgent(tenant_id="public_demo", user_id="anonymous")
+        tenant_id = payload.get("tenant_id", "anonymous")
+        agent = ResearchAgent(tenant_id=tenant_id, user_id="anonymous")
         # LLM Call (~65 seconds)
         result = await agent.analyze_website(url=url, scraped_text=scraped_text)
         report_data = result.model_dump()
@@ -100,7 +101,7 @@ async def website_analysis_handler(payload: dict, job_id: str) -> dict:
             
             brain_data = {
                 "domain": domain,
-                "tenant_id": "public_demo",
+                "tenant_id": tenant_id,
                 "industry": report_data.get("business_intelligence", {}).get("industry", "Unknown"),
                 "icp": report_data.get("icp_discovery", []),
                 "growth_roadmap": report_data.get("growth_roadmap", {}),

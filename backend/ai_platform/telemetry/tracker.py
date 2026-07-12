@@ -1,7 +1,7 @@
 import structlog
 from typing import Optional, Dict, Any
 from datetime import datetime
-from ai_platform.telemetry.storage import TelemetryStorage
+from .storage import TelemetryStorage
 import uuid
 
 logger = structlog.get_logger(__name__)

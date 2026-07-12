@@ -9,8 +9,12 @@ interface Message {
   content: string;
 }
 
-export function DashboardChatbot() {
-  const [isOpen, setIsOpen] = useState(false);
+interface DashboardChatbotProps {
+  inline?: boolean;
+}
+
+export function DashboardChatbot({ inline = false }: DashboardChatbotProps) {
+  const [isOpen, setIsOpen] = useState(inline);
   const [messages, setMessages] = useState<Message[]>([
     { role: "assistant", content: "Hi! I'm your Visoora AI assistant. How can I help you today?" }
   ]);
@@ -66,6 +70,70 @@ export function DashboardChatbot() {
       setIsLoading(false);
     }
   };
+
+  if (inline) {
+    return (
+      <div className="w-full h-[550px] max-h-[80vh] bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-4 border-b border-[hsl(var(--border-subtle))] bg-black/40 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#00F0FF] to-[#00A3FF] flex items-center justify-center text-black font-bold text-sm">
+              AI
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-sm">Visoora Command Center</h3>
+              <p className="text-[10px] text-gray-400">Type commands to launch missions, or ask questions.</p>
+            </div>
+          </div>
+        </div>
+        {/* Messages Area */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-[#111] to-black">
+          {messages.map((msg, idx) => (
+            <div key={idx} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div 
+                className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed ${
+                  msg.role === "user" 
+                    ? "bg-[#222] border border-[#333] text-white rounded-br-none" 
+                    : "bg-[#00F0FF]/10 border border-[#00F0FF]/20 text-gray-100 rounded-bl-none"
+                }`}
+              >
+                {msg.content}
+              </div>
+            </div>
+          ))}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="bg-[#00F0FF]/10 border border-[#00F0FF]/20 text-gray-100 p-4 rounded-2xl rounded-bl-none flex items-center gap-2">
+                <span className="w-1.5 h-1.5 bg-[#00F0FF] rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                <span className="w-1.5 h-1.5 bg-[#00F0FF] rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                <span className="w-1.5 h-1.5 bg-[#00F0FF] rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+        {/* Input Area */}
+        <div className="p-4 bg-black/40 border-t border-[hsl(var(--border-subtle))]">
+          <form onSubmit={handleSubmit} className="flex gap-2">
+            <input
+              type="text"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="e.g., 'Launch a new mission for Healthcare SaaS...'"
+              className="flex-1 bg-[#222] border border-[#333] rounded-xl px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-[#00F0FF]/50 focus:ring-1 focus:ring-[#00F0FF]/50 transition-all"
+            />
+            <button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="bg-[#00F0FF] text-black px-4 rounded-xl font-bold disabled:opacity-50 hover:bg-[#00F0FF]/90 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

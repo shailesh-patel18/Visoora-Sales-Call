@@ -68,13 +68,18 @@ async def company_research_job_handler(payload: dict, job_id: str = None) -> dic
             "brand_voice_tone": "Direct, Professional, Concise"
         }
         try:
-            res = supabase_client.table("tenants").select("settings").eq("id", tenant_uuid).execute()
-            if res.data and res.data[0].get("settings"):
-                settings = res.data[0]["settings"]
-                if "business_brain" in settings:
-                    business_brain = settings["business_brain"]
-        except:
-            pass
+            res = supabase_client.table("business_brains").select("metadata").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(1).execute()
+            if res.data and res.data[0].get("metadata"):
+                metadata = res.data[0]["metadata"]
+                # The full report is in metadata.full_report
+                if "full_report" in metadata:
+                    report = metadata["full_report"]
+                    business_brain["company_description"] = report.get("executive_summary", {}).get("company_description", business_brain["company_description"])
+                    business_brain["value_proposition"] = report.get("executive_summary", {}).get("value_proposition", business_brain["value_proposition"])
+                    business_brain["icp_industries"] = [icp.get("industry") for icp in report.get("icp_discovery", []) if icp.get("industry")]
+                    business_brain["competitors"] = [comp.get("name") for comp in report.get("competitor_analysis", []) if comp.get("name")]
+        except Exception as e:
+            logger.warn("failed_to_fetch_business_brain", error=str(e))
 
         await _update_job_status(tenant_id, payload, {"stage": "TARGET_SELECTION", "pct": 20}, job_id)
         
@@ -207,11 +212,11 @@ async def run_company_research(contact_id: str, tenant_id: str, contact_data: di
     if not contact and supabase_client:
         try:
             try:
-                res = supabase_client.table("contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
             except Exception:
-                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
         except Exception as e:

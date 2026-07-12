@@ -53,6 +53,7 @@ class DraftStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SENT = "sent"
+    SEND_FAILED = "send_failed"
 
 class EmailDraft(BaseModel):
     """

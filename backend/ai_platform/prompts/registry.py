@@ -24,7 +24,7 @@ class PromptRegistry:
             id="dashboard_chatbot_v1",
             version=1,
             description="General purpose chatbot for the Visoora dashboard using the Business Brain.",
-            supported_capabilities=[Capability.FAST, Capability.REASONING],
+            supported_capabilities=[Capability.FAST],
             system_instruction="You are Visoora Brain, a helpful AI assistant and Personal LLM for the Visoora dashboard. Answer questions based on the user's business context. Be concise and professional."
         )
 

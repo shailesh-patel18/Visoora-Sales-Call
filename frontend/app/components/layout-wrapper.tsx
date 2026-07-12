@@ -1,7 +1,7 @@
 "use client";
 
-import React from "react";
-import { usePathname } from "next/navigation";
+import React, { useEffect } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { useCRMStore } from "../store";
 import { Menu, Zap } from "lucide-react";
@@ -10,7 +10,8 @@ import { NotificationCenter } from "./notification-center";
 
 export function LayoutWrapper({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { mobileSidebarOpen, setMobileSidebarOpen } = useCRMStore();
+  const router = useRouter();
+  const { mobileSidebarOpen, setMobileSidebarOpen, highestCompletedStep } = useCRMStore();
   
   const authRoutes = ["/login", "/signup", "/forgotpass", "/resetpass"];
   const isAuthRoute = authRoutes.includes(pathname || "");
@@ -18,6 +19,33 @@ export function LayoutWrapper({ children }: { children: React.ReactNode }) {
   
   const publicRoutes = ["/", "/about", "/contact"];
   const isPublicRoute = publicRoutes.includes(pathname || "") || pathname?.startsWith("/blog");
+
+  // Route Protection Logic
+  useEffect(() => {
+    if (isAuthRoute || isOnboardingRoute || isPublicRoute) return;
+
+    const workflowSteps = [
+      { step: 1, href: "/onboarding" },
+      { step: 2, href: "/business-map" },
+      { step: 3, href: "/playbooks" },
+      { step: 4, href: "/settings/email" },
+      { step: 5, href: "/contacts" },
+      { step: 6, href: "/campaigns" },
+      { step: 7, href: "/agents" },
+      { step: 8, href: "/inbox" },
+      { step: 9, href: "/outbound" },
+      { step: 10, href: "/calls" },
+      { step: 11, href: "/pipeline" },
+      { step: 12, href: "/dashboard" },
+    ];
+
+    const matchedStep = workflowSteps.find(s => pathname === s.href || pathname?.startsWith(s.href + "/"));
+    if (matchedStep && matchedStep.step > highestCompletedStep + 1) {
+      // Find the last unlocked step
+      const redirectStep = workflowSteps.find(s => s.step === highestCompletedStep + 1) || workflowSteps[0];
+      router.replace(redirectStep.href);
+    }
+  }, [pathname, highestCompletedStep, isAuthRoute, isOnboardingRoute, isPublicRoute, router]);
 
   // For authentication phases, onboarding, and public routes, bypass the sidebar layout structure
   if (isAuthRoute || isOnboardingRoute || isPublicRoute) {

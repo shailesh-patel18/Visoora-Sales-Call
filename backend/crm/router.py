@@ -78,6 +78,16 @@ async def create_contact(contact: ContactCreate, user: UserPrincipal = Depends(g
         try:
             res = supabase_client.table("contacts").insert(payload).execute()
             if res.data:
+                try:
+                    from server.worker import enqueue_background_job
+                    tenant_uuid = getattr(user, "tenant_uuid", user.tenant_id)
+                    await enqueue_background_job(
+                        tenant_id=tenant_uuid,
+                        job_type="research_prospect",
+                        payload={"contact_id": payload["id"], "tenant_id": tenant_uuid}
+                    )
+                except Exception as w_err:
+                    logger.error("enqueue_research_prospect_failed", error=str(w_err))
                 return res.data[0]
         except Exception as e:
             logger.error("api_create_contact_db_failed", error=str(e))

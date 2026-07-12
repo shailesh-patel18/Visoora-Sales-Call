@@ -52,7 +52,26 @@ def create_workflow_job(workflow_type: str, tenant_id: str, payload: Dict[str, A
         
     return WorkflowJob(**job_data)
 
-def emit_workflow_event(job_id: str, event_type: str, step_name: str = None, payload: Dict[str, Any] = None):
+def emit_workflow_event(job_id: str, event_type: str, step_name: str = None, payload: Dict[str, Any] = None, tenant_id: str = None):
+    # Try to fetch tenant_id from context if not provided
+    if not tenant_id:
+        try:
+            from security.logging import tenant_id_var
+            tid = tenant_id_var.get()
+            if tid and tid != "system":
+                tenant_id = tid
+        except Exception:
+            pass
+
+    # Fallback to DB lookup if we only have job_id
+    if not tenant_id and supabase_client:
+        try:
+            res = supabase_client.table("workflow_jobs").select("tenant_id").eq("id", job_id).execute()
+            if res.data:
+                tenant_id = res.data[0]["tenant_id"]
+        except Exception:
+            pass
+
     event_data = {
         "job_id": job_id,
         "event_type": event_type,
@@ -65,12 +84,13 @@ def emit_workflow_event(job_id: str, event_type: str, step_name: str = None, pay
         except Exception as e:
             logger.error("workflow_event_failed", error=str(e))
             
-    # Also broadcast via SSE Manager
-    try:
-        from server.sse_manager import sse_broadcast
-        sse_broadcast(job_id, event_data)
-    except ImportError:
-        pass # SSE Manager might not be imported yet
+    # Broadcast via SSE Manager
+    if tenant_id:
+        try:
+            from server.sse_manager import sse_broadcast
+            sse_broadcast(tenant_id, event_data)
+        except ImportError:
+            pass # SSE Manager might not be imported yet
 
 def update_job_status(job_id: str, status: str, result_id: str = None, error: str = None):
     updates = {"status": status, "updated_at": datetime.datetime.utcnow().isoformat()}

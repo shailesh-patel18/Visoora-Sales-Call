@@ -49,14 +49,14 @@ export default function V3OnboardingPage() {
       // 2. Call complete API
       await completeOnboarding({
         tenant_id: tenantId,
-        company_name: brainData.company_name,
+        company_name: brainData.company_name.value,
         website: url,
-        company_description: brainData.company_description,
-        value_proposition: brainData.value_proposition,
-        competitors: brainData.potential_competitors,
-        icp_segments: brainData.suggested_segments,
-        decision_maker_titles: brainData.estimated_decision_makers.map(dm => dm.title),
-        brand_voice_tone: brainData.brand_voice_tone,
+        company_description: brainData.company_description.value,
+        value_proposition: brainData.value_proposition.value,
+        competitors: brainData.potential_competitors.map(c => c.value),
+        icp_segments: brainData.suggested_segments.map(s => ({segment: s.segment, rationale: s.rationale})),
+        decision_maker_titles: brainData.estimated_decision_makers.map(dm => dm.value),
+        brand_voice_tone: brainData.brand_voice_tone.value,
         // Mark voice as explicitly not configured
         phone_number: null,
         agent_name: "Visoora AI",
@@ -160,17 +160,31 @@ export default function V3OnboardingPage() {
             <div className="p-6 bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl shadow-xl space-y-6">
               
               <div className="border-b border-[hsl(var(--border-subtle))] pb-4 mb-4">
-                 <h3 className="text-lg font-bold text-white mb-2">{brainData.company_name}</h3>
-                 <p className="text-sm text-gray-400">{brainData.company_description}</p>
+                 <div className="flex items-center gap-2 mb-2">
+                   <h3 className="text-lg font-bold text-white">{brainData.company_name.value}</h3>
+                   {brainData.company_name.confidence > 0 && (
+                     <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30" title={`Source: ${brainData.company_name.source_url}\n\n"${brainData.company_name.snippet}"`}>
+                       {brainData.company_name.confidence}% Verified
+                     </span>
+                   )}
+                 </div>
+                 <p className="text-sm text-gray-400" title={`Source: ${brainData.company_description.source_url}\n\n"${brainData.company_description.snippet}"`}>{brainData.company_description.value}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-6">
                 <div className="col-span-2">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 block">Value Proposition</label>
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 block">Value Proposition</label>
+                    {brainData.value_proposition.confidence > 0 && (
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30 cursor-help" title={`Source: ${brainData.value_proposition.source_url}\n\n"${brainData.value_proposition.snippet}"`}>
+                        {brainData.value_proposition.confidence}% Verified
+                      </span>
+                    )}
+                  </div>
                   <textarea 
                     className="w-full bg-[#1A1A1A] text-gray-200 text-sm border border-[#00F0FF]/30 rounded-lg p-3 focus:outline-none focus:border-[#00F0FF] transition-colors"
-                    value={brainData.value_proposition}
-                    onChange={(e) => setBrainData({...brainData, value_proposition: e.target.value})}
+                    value={brainData.value_proposition.value}
+                    onChange={(e) => setBrainData({...brainData, value_proposition: {...brainData.value_proposition, value: e.target.value}})}
                     rows={2}
                   />
                 </div>
@@ -179,7 +193,7 @@ export default function V3OnboardingPage() {
                   <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 block">Ideal Customer Profiles (ICP)</label>
                   <div className="space-y-3">
                     {brainData.suggested_segments.map((seg, idx) => (
-                      <div key={idx} className="p-3 bg-white/5 border border-white/10 rounded-lg flex flex-col gap-2">
+                      <div key={idx} className="p-3 bg-white/5 border border-white/10 rounded-lg flex flex-col gap-2 relative group" title={seg.snippet !== 'N/A' ? `Source: ${seg.source_url}\n\n"${seg.snippet}"` : 'Unable to verify'}>
                         <div className="flex justify-between items-center">
                           <input 
                             className="font-semibold text-white text-sm bg-transparent border-b border-transparent hover:border-gray-500 focus:border-[#00F0FF] focus:outline-none w-2/3"
@@ -190,7 +204,9 @@ export default function V3OnboardingPage() {
                               setBrainData({...brainData, suggested_segments: newSegs});
                             }}
                           />
-                          <span className="text-xs font-bold text-[#10B981]">{seg.confidence}% match</span>
+                          <span className={`text-xs font-bold ${seg.confidence >= 90 ? 'text-[#10B981]' : seg.confidence > 0 ? 'text-yellow-500' : 'text-gray-500'}`}>
+                            {seg.confidence}% match
+                          </span>
                         </div>
                         <input 
                           className="text-xs text-gray-400 bg-transparent border-b border-transparent hover:border-gray-600 focus:border-[#00F0FF] focus:outline-none w-full"
@@ -207,15 +223,17 @@ export default function V3OnboardingPage() {
                 </div>
 
                 <div className="col-span-2">
-                  <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 block">Target Decision Makers</label>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 block">Target Decision Makers</label>
+                  </div>
                   <textarea 
                     className="w-full bg-[#1A1A1A] text-sm text-gray-300 border border-[hsl(var(--border-subtle))] rounded-lg p-3 focus:outline-none focus:border-[#00F0FF] transition-colors"
-                    value={brainData.estimated_decision_makers.map(dm => dm.title).join(", ")}
+                    value={brainData.estimated_decision_makers.map(dm => dm.value).join(", ")}
                     onChange={(e) => {
                       const titles = e.target.value.split(",").map(t => t.trim()).filter(Boolean);
                       setBrainData({
                         ...brainData, 
-                        estimated_decision_makers: titles.map(t => ({ title: t, confidence: 90 }))
+                        estimated_decision_makers: titles.map(t => ({ value: t, confidence: 90, snippet: "Manual Entry", source_url: "N/A" }))
                       });
                     }}
                     placeholder="e.g. CEO, VP of Sales (comma separated)"
@@ -228,10 +246,10 @@ export default function V3OnboardingPage() {
                   <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2 block">Likely Competitors</label>
                   <textarea 
                     className="w-full bg-[#1A1A1A] text-sm text-red-400 font-bold border border-red-500/30 rounded-lg p-3 focus:outline-none focus:border-red-500 transition-colors"
-                    value={brainData.potential_competitors.join(", ")}
+                    value={brainData.potential_competitors.map(c => c.value).join(", ")}
                     onChange={(e) => {
                       const comps = e.target.value.split(",").map(c => c.trim()).filter(Boolean);
-                      setBrainData({...brainData, potential_competitors: comps});
+                      setBrainData({...brainData, potential_competitors: comps.map(c => ({ value: c, confidence: 90, snippet: "Manual Entry", source_url: "N/A" }))});
                     }}
                     placeholder="e.g. Salesforce, HubSpot (comma separated)"
                     rows={2}

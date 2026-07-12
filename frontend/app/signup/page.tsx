@@ -63,12 +63,12 @@ function SignupContent() {
       setIsLoading(false);
       if (success) {
         setIsSuccess(true);
-        // Redirect to login after showing success state
+        // Redirect to onboarding after showing success state
         setTimeout(() => {
           if (reportId) {
-            router.push(`/login?report_id=${reportId}`);
+            router.push(`/onboarding?report_id=${reportId}`);
           } else {
-            router.push("/login");
+            router.push("/onboarding");
           }
         }, 1800);
       } else {

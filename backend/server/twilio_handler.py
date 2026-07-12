@@ -518,7 +518,7 @@ from services.sms import sms_router
 app.include_router(sms_router)
 
 # Include onboarding wizard and phone provisioning router
-from server.onboarding_api import onboarding_router
+from server.onboarding_api import router as onboarding_router
 app.include_router(onboarding_router)
 
 # Include background jobs router
@@ -542,7 +542,11 @@ app.include_router(auth_router, prefix="/api/v1")
 
 # Include draft router
 from server.draft_router import router as draft_router
+from server.events_api import router as events_router
+
 app.include_router(draft_router, prefix="/api/v1")
+app.include_router(events_router)
+app.include_router(onboarding_router)
 
 # Prometheus metrics endpoint — unprotected for scraper access
 @app.get("/metrics")

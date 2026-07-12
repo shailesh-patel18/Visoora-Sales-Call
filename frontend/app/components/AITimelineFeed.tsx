@@ -6,19 +6,20 @@ import { motion } from "framer-motion";
 import { BACKEND_URL } from "../config";
 import { getAuthHeaders, useAuthStore } from "../auth/store";
 
-export function AITimelineFeed({ missionId }: { missionId?: string | null }) {
+export function AITimelineFeed({ missionId, newEvent }: { missionId?: string | null, newEvent?: any }) {
   const { isAuthenticated } = useAuthStore();
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isAuthenticated) fetchTimeline();
-    const pollRate = missionId ? 3000 : 30000;
-    const interval = setInterval(() => {
-      if (isAuthenticated) fetchTimeline();
-    }, pollRate);
-    return () => clearInterval(interval);
   }, [missionId, isAuthenticated]);
+
+  useEffect(() => {
+    if (newEvent && (newEvent.event_type === "mission_event" || newEvent.event_type === "workflow_event")) {
+      setEvents((prev) => [newEvent.payload, ...prev]);
+    }
+  }, [newEvent]);
 
   const fetchTimeline = async () => {
     try {

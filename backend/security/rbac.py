@@ -52,15 +52,16 @@ async def get_current_user(
             logger.warn("m2m_auth_failure", message="Invalid M2M API Key presented.")
             raise AuthenticationException("Invalid or expired API Key.")
             
-    # 2. Inspect Bearer JWT Auth Token
-    elif bearer:
-        token = bearer.credentials
+    # 2. Inspect Bearer JWT Auth Token (from header or query param)
+    elif bearer or request.query_params.get("token"):
+        token = bearer.credentials if bearer else request.query_params.get("token")
+        
         # Verify and parse signature keys from Supabase JWKS
         jwt_payload = await verify_supabase_jwt(token)
         
         # Extract metadata
         user_id = jwt_payload.get("sub", "")
-        email = jwt_payload.get("email", "unknown@user.supabase")
+        email = jwt_payload.get("email", "")
         
         # Parse Roles from standard GoTrue JWT configurations
         app_metadata = jwt_payload.get("app_metadata", {})

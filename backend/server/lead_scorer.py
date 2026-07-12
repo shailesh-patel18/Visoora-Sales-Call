@@ -69,11 +69,11 @@ async def calculate_and_save_lead_score(contact_id: str, tenant_id: str):
     if supabase_client:
         try:
             try:
-                res = supabase_client.table("contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
             except Exception:
-                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
         except Exception as e:

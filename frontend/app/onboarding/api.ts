@@ -1,17 +1,24 @@
 import { BACKEND_URL } from "../config";
 import { getAuthHeaders } from "../auth/store";
 
+export interface EvidenceStringField {
+  value: string;
+  confidence: number;
+  snippet: string;
+  source_url: string;
+}
+
 export interface AnalyzeDomainResponse {
-  company_name: string;
-  company_description: string;
-  value_proposition: string;
-  estimated_industries: { industry: string; confidence: number }[];
-  estimated_regions: { region: string; confidence: number }[];
-  estimated_decision_makers: { title: string; confidence: number }[];
-  potential_competitors: string[];
-  potential_objections: { objection: string; rebuttal: string }[];
-  suggested_segments: { segment: string; confidence: number; rationale: string }[];
-  brand_voice_tone: string;
+  company_name: EvidenceStringField;
+  company_description: EvidenceStringField;
+  value_proposition: EvidenceStringField;
+  estimated_industries: EvidenceStringField[];
+  estimated_regions: EvidenceStringField[];
+  estimated_decision_makers: EvidenceStringField[];
+  potential_competitors: EvidenceStringField[];
+  potential_objections: { objection: string; rebuttal: string; confidence: number; snippet: string; source_url: string }[];
+  suggested_segments: { segment: string; rationale: string; confidence: number; snippet: string; source_url: string }[];
+  brand_voice_tone: EvidenceStringField;
 }
 
 export async function analyzeDomain(website: string): Promise<AnalyzeDomainResponse> {

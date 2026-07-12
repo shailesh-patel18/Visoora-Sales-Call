@@ -146,9 +146,24 @@ interface CRMStore {
   mobileSidebarOpen: boolean;
   toggleMobileSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
+  // Workflow Tracking
+  currentWorkflowStep: number;
+  highestCompletedStep: number;
+  setWorkflowStep: (step: number) => void;
+  markStepComplete: (step: number) => void;
 }
 
 export const useCRMStore = create<CRMStore>((set) => ({
+  // Workflow Tracking
+  currentWorkflowStep: 1, // Start at step 1
+  highestCompletedStep: 1, // Start with step 1 unlocked (Domain Analysis is technically done, but ICP is next)
+  setWorkflowStep: (step) => set((s) => ({
+    currentWorkflowStep: step <= s.highestCompletedStep + 1 ? step : s.currentWorkflowStep
+  })),
+  markStepComplete: (step) => set((s) => ({
+    highestCompletedStep: Math.max(s.highestCompletedStep, step)
+  })),
+
   // Contacts
   contacts: [],
   setContacts: (contacts) => set({ contacts }),

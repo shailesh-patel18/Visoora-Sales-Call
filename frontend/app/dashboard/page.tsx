@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import { AITimelineFeed } from "../components/AITimelineFeed";
 import { WorkspaceHealth } from "../components/WorkspaceHealth";
 import { DashboardChatbot } from "../components/DashboardChatbot";
+import { useEventBus } from "../hooks/useEventBus";
+import { AIBriefing } from "../components/AIBriefing";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -18,89 +20,79 @@ export default function DashboardPage() {
         active_missions_count: 0,
         leads_researched_count: 0,
         pipeline_value: 0,
-        drafts_pending_count: 0
+        drafts_pending_count: 0,
+        ai_briefing: []
     });
 
-    useEffect(() => {
-        async function loadRevenue() {
-            try {
-                const headers = getAuthHeaders();
-                if (!headers.Authorization) return;
-                
-                const res = await fetch(`${BACKEND_URL}/api/analytics/dashboard/revenue`, {
-                    headers
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setRevenueData(data);
-                } else if (res.status === 401) {
-                    console.warn("Unauthorized, stopping revenue polling");
-                }
-            } catch (err) {
-                console.error("Failed to fetch revenue data:", err);
+    const loadRevenue = async () => {
+        try {
+            const headers = getAuthHeaders();
+            if (!headers.Authorization) return;
+            
+            const res = await fetch(`${BACKEND_URL}/api/analytics/dashboard/revenue`, { headers });
+            if (res.ok) {
+                const data = await res.json();
+                setRevenueData(data);
             }
+        } catch (err) {
+            console.error("Failed to fetch revenue data:", err);
         }
+    };
+
+    const loadBrain = async () => {
+        try {
+            const res = await fetch(`${BACKEND_URL}/api/analytics/business-map`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const data = await res.json();
+                setBrain(data.agent_config);
+            }
+        } catch (err) {
+            console.error("Failed to fetch brain data:", err);
+        }
+    };
+
+    const loadMissionStatus = async () => {
+        try {
+            const headers = getAuthHeaders();
+            if (!headers.Authorization) return;
+            const res = await fetch(`${BACKEND_URL}/api/analytics/missions/status`, { headers });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.stage) {
+                    setMissionProgress(data);
+                    if (missionState === "LAUNCHING" && data.pct > 0) {
+                        setMissionState("RUNNING");
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("Failed to fetch mission status:", err);
+        }
+    };
+
+    // Initial Load
+    useEffect(() => {
         if (isAuthenticated) {
             loadRevenue();
-        }
-        // Poll revenue data every 10 seconds to keep dashboard fresh
-        const interval = setInterval(() => {
-            if (isAuthenticated) loadRevenue();
-        }, 10000);
-        return () => clearInterval(interval);
-    }, [isAuthenticated]);
-
-    useEffect(() => {
-        async function loadBrain() {
-            try {
-                const res = await fetch(`${BACKEND_URL}/api/analytics/business-map`, {
-                    headers: getAuthHeaders()
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setBrain(data.agent_config);
-                }
-            } catch (err) {
-                console.error("Failed to fetch brain data:", err);
-            }
-        }
-        if (isAuthenticated) {
             loadBrain();
+            loadMissionStatus();
         }
     }, [isAuthenticated]);
 
-    useEffect(() => {
-        let interval: any;
-        if (missionState === "LAUNCHING" || missionState === "RUNNING") {
-            interval = setInterval(async () => {
-                try {
-                    const headers = getAuthHeaders();
-                    if (!headers.Authorization) {
-                        clearInterval(interval);
-                        return;
-                    }
-                    // Make sure currentMissionId is used if available, otherwise just general status
-                    const res = await fetch(`${BACKEND_URL}/api/analytics/missions/status`, {
-                        headers
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data && data.stage) {
-                            setMissionProgress(data);
-                            if (missionState === "LAUNCHING" && data.pct > 0) {
-                                setMissionState("RUNNING");
-                            }
-                        }
-                    } else if (res.status === 401) {
-                        clearInterval(interval);
-                    }
-                } catch (err) {
-                    console.error("Failed to fetch mission status:", err);
-                }
-            }, 2000);
+    // Real-time Event Bus
+    const [latestEvent, setLatestEvent] = useState<any>(null);
+    useEventBus((event) => {
+        console.log("Dashboard received event:", event);
+        setLatestEvent(event);
+        
+        // React to specific events
+        if (event.event_type === "mission_started" || event.event_type === "mission_updated") {
+            loadMissionStatus();
         }
-        return () => clearInterval(interval);
-    }, [missionState, currentMissionId]);
+        if (event.event_type === "draft_created" || event.event_type === "lead_scored") {
+            loadRevenue(); // Update pipeline/draft counts
+        }
+    });
 
     const handleLaunch = async () => {
         setMissionState("LAUNCHING");
@@ -134,25 +126,8 @@ export default function DashboardPage() {
 
     return (
         <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-8">
-            {/* Top Stats Row */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-[#111] p-6 rounded-2xl border border-[hsl(var(--border-subtle))] shadow-lg relative overflow-hidden">
-                    <div className="text-gray-400 font-medium tracking-wide uppercase text-xs mb-4">Pipeline Generated</div>
-                    <div className="text-3xl font-bold text-white">${revenueData.pipeline_value.toLocaleString()}</div>
-                </div>
-                <div className="bg-[#111] p-6 rounded-2xl border border-[hsl(var(--border-subtle))] shadow-lg relative overflow-hidden">
-                    <div className="text-gray-400 font-medium tracking-wide uppercase text-xs mb-4">Meetings Booked</div>
-                    <div className="text-3xl font-bold text-[#10B981]">0</div>
-                </div>
-                <div className="bg-[#111] p-6 rounded-2xl border border-[hsl(var(--border-subtle))] shadow-lg relative overflow-hidden">
-                    <div className="text-gray-400 font-medium tracking-wide uppercase text-xs mb-4">Active Missions</div>
-                    <div className="text-3xl font-bold text-white">{revenueData.active_missions_count || (missionState === 'RUNNING' ? 1 : 0)}</div>
-                </div>
-                <div className="bg-[#111] p-6 rounded-2xl border border-[hsl(var(--border-subtle))] shadow-lg relative overflow-hidden">
-                    <div className="text-gray-400 font-medium tracking-wide uppercase text-xs mb-4">Leads Researched</div>
-                    <div className="text-3xl font-bold text-white">{revenueData.leads_researched_count}</div>
-                </div>
-            </div>
+            {/* AI Executive Briefing */}
+            <AIBriefing agents={revenueData.ai_briefing} />
 
             {/* Pending Approvals Banner */}
             {revenueData.drafts_pending_count > 0 && (
@@ -172,6 +147,9 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 <div className="lg:col-span-2 space-y-8">
                     
+                    {/* Command Center Chat */}
+                    <DashboardChatbot inline={true} />
+
                     {/* Mission Health / Active Mission */}
                     {missionState === "READY_TO_LAUNCH" ? (
                         <div className="bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl p-6">
@@ -226,7 +204,7 @@ export default function DashboardPage() {
                     )}
 
                     {/* Timeline Feed */}
-                    <AITimelineFeed missionId={currentMissionId} />
+                    <AITimelineFeed missionId={currentMissionId} newEvent={latestEvent} />
                 </div>
                 
                 <div className="lg:col-span-1 space-y-8">
@@ -249,12 +227,33 @@ export default function DashboardPage() {
                             To review or interact with your ICP, click the Chat button in the bottom right corner to talk to the Business Brain.
                         </p>
                     </div>
+
+                    {/* Executive KPIs */}
+                    <div className="bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-white mb-4">Executive KPIs</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Pipeline Generated</div>
+                                <div className="text-xl font-bold text-white">${revenueData.pipeline_value.toLocaleString()}</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Meetings Booked</div>
+                                <div className="text-xl font-bold text-[#10B981]">0</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Active Missions</div>
+                                <div className="text-xl font-bold text-white">{revenueData.active_missions_count || (missionState === 'RUNNING' ? 1 : 0)}</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Leads Researched</div>
+                                <div className="text-xl font-bold text-white">{revenueData.leads_researched_count}</div>
+                            </div>
+                        </div>
+                    </div>
                     
                     <WorkspaceHealth />
                 </div>
             </div>
-            
-            <DashboardChatbot />
         </div>
     );
 }

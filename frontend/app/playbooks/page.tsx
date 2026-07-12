@@ -6,6 +6,8 @@ import {
   MessageSquare, Sparkles, AlertTriangle, ArrowDown, ShieldAlert 
 } from "lucide-react";
 import { useOnboardingStore } from "../onboarding/store";
+import { useCRMStore } from "../store";
+import { useRouter } from "next/navigation";
 import { BACKEND_URL } from "../config";
 import { getAuthHeaders } from "../auth/store";
 
@@ -28,6 +30,9 @@ const playbookSteps: PlaybookStep[] = [
 
 export default function PlaybooksPage() {
   const { state, loadProgress, saveProgress, completeOnboarding } = useOnboardingStore();
+  const { markStepComplete, setWorkflowStep } = useCRMStore();
+  const router = useRouter();
+  
   const [mounted, setMounted] = useState(false);
   const [activeStepState, setActiveStepState] = useState("INITIATION");
   const [isSaving, setIsSaving] = useState(false);
@@ -346,6 +351,21 @@ export default function PlaybooksPage() {
 
           </div>
         </div>
+      </div>
+
+      {/* Next Step Progression */}
+      <div className="flex justify-end pt-8 mt-8 border-t border-[hsl(var(--border-subtle))]">
+        <button 
+          onClick={() => {
+            markStepComplete(3);
+            setWorkflowStep(4);
+            router.push("/settings/email");
+          }}
+          className="px-8 py-3 bg-gradient-to-r from-[#00F0FF] to-[#0080FF] text-white font-bold rounded-xl shadow-[0_0_20px_rgba(0,240,255,0.3)] hover:shadow-[0_0_30px_rgba(0,240,255,0.5)] transition-all flex items-center gap-2"
+        >
+          Continue to Integrations
+          <ArrowRight className="w-5 h-5" />
+        </button>
       </div>
     </div>
   );

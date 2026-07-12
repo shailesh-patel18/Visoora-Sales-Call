@@ -118,12 +118,40 @@ async def get_revenue_dashboard_metrics(user: UserPrincipal = Depends(get_curren
     # 4. Drafts Pending Approval
     from v2.domain.crm.models import DraftStatus
     pending_drafts = await draft_repository.get_by_status(tenant_id, DraftStatus.PENDING_APPROVAL)
+    # 5. AI Executive Briefing Summaries
+    ai_briefing = [
+        {
+            "id": "sdr",
+            "name": "Sarah",
+            "role": "Chief AI SDR",
+            "avatar": "https://api.dicebear.com/7.x/notionists/svg?seed=Sarah",
+            "status": "Active",
+            "summary": f"I drafted {len(pending_drafts)} personalized emails for your review in the Inbox."
+        },
+        {
+            "id": "research",
+            "name": "David",
+            "role": "Research Analyst",
+            "avatar": "https://api.dicebear.com/7.x/notionists/svg?seed=David",
+            "status": "Active",
+            "summary": f"I scraped {leads_count} domains matching your ICP and enriched them with CRM data."
+        },
+        {
+            "id": "voice",
+            "name": "Alex",
+            "role": "Voice Agent",
+            "avatar": "https://api.dicebear.com/7.x/notionists/svg?seed=Alex",
+            "status": "Idle",
+            "summary": "I handled 0 inbound calls today. My phone line is ready to accept leads."
+        }
+    ]
     
     return {
         "active_missions_count": active_missions_count,
         "leads_researched_count": leads_count,
         "pipeline_value": pipeline_value,
-        "drafts_pending_count": len(pending_drafts)
+        "drafts_pending_count": len(pending_drafts),
+        "ai_briefing": ai_briefing
     }
 
 @analytics_router.get("/dashboard")
@@ -1255,9 +1283,15 @@ async def regenerate_artifact(artifact_id: str, payload: RegeneratePayload, user
             "brand_voice_tone": "Direct, Professional, Concise"
         }
         try:
-            brain_res = get_scoped_supabase_client(user.raw_token).table("tenants").select("settings").eq("id", tenant_uuid).execute()
-            if brain_res.data and brain_res.data[0].get("settings", {}).get("business_brain"):
-                business_brain = brain_res.data[0]["settings"]["business_brain"]
+            brain_res = get_scoped_supabase_client(user.raw_token).table("business_brains").select("metadata").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(1).execute()
+            if brain_res.data and brain_res.data[0].get("metadata"):
+                metadata = brain_res.data[0]["metadata"]
+                if "full_report" in metadata:
+                    report = metadata["full_report"]
+                    business_brain["company_description"] = report.get("executive_summary", {}).get("company_description", business_brain["company_description"])
+                    business_brain["value_proposition"] = report.get("executive_summary", {}).get("value_proposition", business_brain["value_proposition"])
+                    business_brain["icp_industries"] = [icp.get("industry") for icp in report.get("icp_discovery", []) if icp.get("industry")]
+                    business_brain["competitors"] = [comp.get("name") for comp in report.get("competitor_analysis", []) if comp.get("name")]
         except Exception:
             pass
 
@@ -1334,9 +1368,15 @@ async def generate_alternatives(artifact_id: str, user: UserPrincipal = Depends(
             "brand_voice_tone": "Direct, Professional, Concise"
         }
         try:
-            brain_res = get_scoped_supabase_client(user.raw_token).table("tenants").select("settings").eq("id", tenant_uuid).execute()
-            if brain_res.data and brain_res.data[0].get("settings", {}).get("business_brain"):
-                business_brain = brain_res.data[0]["settings"]["business_brain"]
+            brain_res = get_scoped_supabase_client(user.raw_token).table("business_brains").select("metadata").eq("tenant_id", tenant_uuid).order("created_at", desc=True).limit(1).execute()
+            if brain_res.data and brain_res.data[0].get("metadata"):
+                metadata = brain_res.data[0]["metadata"]
+                if "full_report" in metadata:
+                    report = metadata["full_report"]
+                    business_brain["company_description"] = report.get("executive_summary", {}).get("company_description", business_brain["company_description"])
+                    business_brain["value_proposition"] = report.get("executive_summary", {}).get("value_proposition", business_brain["value_proposition"])
+                    business_brain["icp_industries"] = [icp.get("industry") for icp in report.get("icp_discovery", []) if icp.get("industry")]
+                    business_brain["competitors"] = [comp.get("name") for comp in report.get("competitor_analysis", []) if comp.get("name")]
         except Exception:
             pass
 

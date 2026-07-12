@@ -45,11 +45,11 @@ async def run_email_generation(contact_id: str, tenant_id: str) -> dict:
     if supabase_client:
         try:
             try:
-                res = supabase_client.table("contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
             except Exception:
-                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).execute()
+                res = supabase_client.table("crm_contacts").select("*").eq("id", contact_id).eq("tenant_id", tenant_id).execute()
                 if res.data:
                     contact = res.data[0]
         except Exception as e:

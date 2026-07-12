@@ -44,6 +44,8 @@ class SecuritySettings(BaseModel):
     
     # Machine-to-Machine keys
     api_key_header_name: str = "X-API-Key"
+    openai_api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
+    firecrawl_api_key: str = Field(default_factory=lambda: os.getenv("FIRECRAWL_API_KEY", ""))
     system_api_keys: Set[str] = Field(default_factory=lambda: {
         k.strip() for k in os.getenv("SYSTEM_API_KEYS", "").split(",") if k.strip()
     })

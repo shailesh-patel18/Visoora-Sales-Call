@@ -162,6 +162,31 @@ async def approve_mission_task(task_id: str, user: UserPrincipal = Depends(get_c
             conversation_plan=conversation_plan, 
             user=user
         )
+    
+    # If Email Task, Enqueue Dispatch Job
+    elif task_data.get("agent_type") == "email_agent":
+        artifact_id = task_data.get("result_artifact_id")
+        email_content = {}
+        if artifact_id:
+            art_res = scoped_db.table("mission_artifacts").select("content").eq("id", artifact_id).execute()
+            if art_res.data:
+                email_content = art_res.data[0].get("content", {})
+        
+        prospect_payload = task_data.get("payload", {})
+        to_email = prospect_payload.get("email") or email_content.get("to_email", "")
+        
+        if to_email:
+            await enqueue_background_job(
+                tenant_id=user.tenant_id,
+                job_type="email_dispatch",
+                payload={
+                    "tenant_id": user.tenant_id,
+                    "to_email": to_email,
+                    "subject": email_content.get("subject", "Following up"),
+                    "body": email_content.get("body", ""),
+                    "draft_id": email_content.get("draft_id"),
+                }
+            )
         
     return {"success": True, "status": "running"}
 
