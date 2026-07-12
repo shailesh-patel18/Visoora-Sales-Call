@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
-import { useAuthStore } from '../store';
+import { useAuthStore } from '../auth/store';
 
 export function useEventBus(onEvent: (event: any) => void) {
-    const { token, tenantId } = useAuthStore();
+    const token = useAuthStore((s) => s.token);
+    const tenantId = useAuthStore((s) => s.user?.tenant_id);
 
     useEffect(() => {
         if (!token || !tenantId) return;
