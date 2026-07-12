@@ -100,8 +100,18 @@ async def analyze_domain(payload: AnalyzeRequest, user: UserPrincipal = Depends(
             firecrawl_app.scrape_url,
             url
         )
-        markdown_content = scrape_result.get('markdown', '')
-        source_url = scrape_result.get('metadata', {}).get('sourceURL', url)
+        
+        # Support both older firecrawl dict returns and newer v1.0.0+ Pydantic Document returns
+        if hasattr(scrape_result, 'model_dump'):
+            scrape_data = scrape_result.model_dump()
+        elif hasattr(scrape_result, 'dict'):
+            scrape_data = scrape_result.dict()
+        else:
+            scrape_data = scrape_result
+            
+        markdown_content = scrape_data.get('markdown', '')
+        metadata = scrape_data.get('metadata') or {}
+        source_url = metadata.get('sourceURL') or metadata.get('source_url') or url
     except Exception as e:
         logger.error("firecrawl_scrape_failed", error=str(e), website=url)
         raise HTTPException(status_code=400, detail=f"Failed to scrape website: {str(e)}")
