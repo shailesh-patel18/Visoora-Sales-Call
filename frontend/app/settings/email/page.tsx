@@ -14,9 +14,12 @@ import {
   Settings,
   Shield,
   Loader2,
+  ArrowRight,
 } from "lucide-react";
 import { BACKEND_URL } from "../../config";
 import { getAuthHeaders } from "../../auth/store";
+import { useCRMStore } from "../../store";
+import { useRouter } from "next/navigation";
 
 interface Mailbox {
   id: string;
@@ -32,6 +35,8 @@ export default function EmailAccountsPage() {
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectingProvider, setConnectingProvider] = useState<string | null>(null);
+  const { markStepComplete } = useCRMStore();
+  const router = useRouter();
 
   // Form states for manual configurations (SMTP, SendGrid, etc.)
   const [showAddForm, setShowAddForm] = useState(false);
@@ -288,6 +293,20 @@ export default function EmailAccountsPage() {
               <Plus className="w-3.5 h-3.5" />
               Connect Other (SMTP/API)
             </button>
+
+            {/* Skip / Continue button — always visible so user is never stuck */}
+            <div className="pt-2 border-t border-neutral-800">
+              <button
+                onClick={() => {
+                  markStepComplete(4);
+                  router.push("/contacts");
+                }}
+                className="w-full py-2.5 rounded-lg text-xs font-semibold text-teal-400 hover:text-white hover:bg-teal-500/10 border border-teal-500/30 hover:border-teal-500/60 transition-all flex items-center justify-center gap-2"
+              >
+                Continue to Audience <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+              <p className="text-[10px] text-neutral-600 text-center mt-1.5">You can connect a mailbox later from Settings</p>
+            </div>
           </div>
         </div>
       </div>
