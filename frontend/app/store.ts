@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 // ====================================================
 // TYPE DEFINITIONS
@@ -146,6 +147,7 @@ interface CRMStore {
   mobileSidebarOpen: boolean;
   toggleMobileSidebar: () => void;
   setMobileSidebarOpen: (open: boolean) => void;
+
   // Workflow Tracking
   currentWorkflowStep: number;
   highestCompletedStep: number;
@@ -153,101 +155,116 @@ interface CRMStore {
   markStepComplete: (step: number) => void;
 }
 
-export const useCRMStore = create<CRMStore>((set) => ({
-  // Workflow Tracking
-  currentWorkflowStep: 1, // Start at step 1
-  highestCompletedStep: 1, // Start with step 1 unlocked (Domain Analysis is technically done, but ICP is next)
-  setWorkflowStep: (step) => set((s) => ({
-    currentWorkflowStep: step <= s.highestCompletedStep + 1 ? step : s.currentWorkflowStep
-  })),
-  markStepComplete: (step) => set((s) => ({
-    highestCompletedStep: Math.max(s.highestCompletedStep, step)
-  })),
+export const useCRMStore = create<CRMStore>()(
+  persist(
+    (set) => ({
+      // Workflow Tracking
+      currentWorkflowStep: 1,
+      highestCompletedStep: 1,
+      setWorkflowStep: (step) =>
+        set((s) => ({
+          currentWorkflowStep: step <= s.highestCompletedStep + 1 ? step : s.currentWorkflowStep,
+        })),
+      markStepComplete: (step) =>
+        set((s) => ({
+          highestCompletedStep: Math.max(s.highestCompletedStep, step),
+        })),
 
-  // Contacts
-  contacts: [],
-  setContacts: (contacts) => set({ contacts }),
-  addContact: (contact) => set((s) => ({ contacts: [contact, ...s.contacts] })),
-  updateContact: (id, data) =>
-    set((s) => ({
-      contacts: s.contacts.map((c) => (c.id === id ? { ...c, ...data } : c)),
-    })),
-  removeContact: (id) =>
-    set((s) => ({ contacts: s.contacts.filter((c) => c.id !== id) })),
+      // Contacts
+      contacts: [],
+      setContacts: (contacts) => set({ contacts }),
+      addContact: (contact) => set((s) => ({ contacts: [contact, ...s.contacts] })),
+      updateContact: (id, data) =>
+        set((s) => ({
+          contacts: s.contacts.map((c) => (c.id === id ? { ...c, ...data } : c)),
+        })),
+      removeContact: (id) =>
+        set((s) => ({ contacts: s.contacts.filter((c) => c.id !== id) })),
 
-  // Pipeline
-  stages: [],
-  setStages: (stages) => set({ stages }),
-  moveDeal: (dealId, fromStageId, toStageId) =>
-    set((s) => {
-      const newStages = s.stages.map((stage) => {
-        if (stage.id === fromStageId) {
-          return { ...stage, deals: stage.deals.filter((d) => d.id !== dealId) };
-        }
-        if (stage.id === toStageId) {
-          const fromStage = s.stages.find((st) => st.id === fromStageId);
-          const deal = fromStage?.deals.find((d) => d.id === dealId);
-          if (deal) {
-            return {
-              ...stage,
-              deals: [...stage.deals, { ...deal, stage_id: toStageId, stage_name: stage.name }],
-            };
-          }
-        }
-        return stage;
-      });
-      return { stages: newStages };
+      // Pipeline
+      stages: [],
+      setStages: (stages) => set({ stages }),
+      moveDeal: (dealId, fromStageId, toStageId) =>
+        set((s) => {
+          const newStages = s.stages.map((stage) => {
+            if (stage.id === fromStageId) {
+              return { ...stage, deals: stage.deals.filter((d) => d.id !== dealId) };
+            }
+            if (stage.id === toStageId) {
+              const fromStage = s.stages.find((st) => st.id === fromStageId);
+              const deal = fromStage?.deals.find((d) => d.id === dealId);
+              if (deal) {
+                return {
+                  ...stage,
+                  deals: [...stage.deals, { ...deal, stage_id: toStageId, stage_name: stage.name }],
+                };
+              }
+            }
+            return stage;
+          });
+          return { stages: newStages };
+        }),
+      addDeal: (deal) =>
+        set((s) => ({
+          stages: s.stages.map((stage) =>
+            stage.id === deal.stage_id
+              ? { ...stage, deals: [...stage.deals, deal] }
+              : stage
+          ),
+        })),
+      removeDeal: (dealId) =>
+        set((s) => ({
+          stages: s.stages.map((stage) => ({
+            ...stage,
+            deals: stage.deals.filter((d) => d.id !== dealId),
+          })),
+        })),
+
+      // Live Calls
+      liveCalls: [],
+      setLiveCalls: (calls) =>
+        set((s) => ({
+          liveCalls: typeof calls === "function" ? calls(s.liveCalls) : calls,
+        })),
+
+      // Activity Feed
+      activities: [],
+      setActivities: (events) =>
+        set((s) => ({
+          activities: typeof events === "function" ? events(s.activities) : events,
+        })),
+
+      // Call Logs
+      callLogs: [],
+      setCallLogs: (logs) => set({ callLogs: logs }),
+
+      // Compliance
+      compliance: {
+        recording_disclosure_enabled: true,
+        recording_disclosure_text: "This call may be recorded for quality and training purposes.",
+        ai_disclosure_enabled: true,
+        ai_disclosure_text: "You are speaking with an AI assistant from [Company].",
+        calling_hours_start: "08:00",
+        calling_hours_end: "21:00",
+        calling_timezone: "America/New_York",
+      },
+      setCompliance: (settings) => set({ compliance: settings }),
+
+      // UI
+      sidebarCollapsed: false,
+      toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
+      mobileSidebarOpen: false,
+      toggleMobileSidebar: () => set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen })),
+      setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
     }),
-  addDeal: (deal) =>
-    set((s) => ({
-      stages: s.stages.map((stage) =>
-        stage.id === deal.stage_id
-          ? { ...stage, deals: [...stage.deals, deal] }
-          : stage
-      ),
-    })),
-  removeDeal: (dealId) =>
-    set((s) => ({
-      stages: s.stages.map((stage) => ({
-        ...stage,
-        deals: stage.deals.filter((d) => d.id !== dealId),
-      })),
-    })),
-
-  // Live Calls
-  liveCalls: [],
-  setLiveCalls: (calls) =>
-    set((s) => ({
-      liveCalls: typeof calls === "function" ? calls(s.liveCalls) : calls,
-    })),
-
-  // Activity Feed
-  activities: [],
-  setActivities: (events) =>
-    set((s) => ({
-      activities: typeof events === "function" ? events(s.activities) : events,
-    })),
-
-  // Call Logs
-  callLogs: [],
-  setCallLogs: (logs) => set({ callLogs: logs }),
-
-  // Compliance
-  compliance: {
-    recording_disclosure_enabled: true,
-    recording_disclosure_text: "This call may be recorded for quality and training purposes.",
-    ai_disclosure_enabled: true,
-    ai_disclosure_text: "You are speaking with an AI assistant from [Company].",
-    calling_hours_start: "08:00",
-    calling_hours_end: "21:00",
-    calling_timezone: "America/New_York",
-  },
-  setCompliance: (settings) => set({ compliance: settings }),
-
-  // UI
-  sidebarCollapsed: false,
-  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
-  mobileSidebarOpen: false,
-  toggleMobileSidebar: () => set((s) => ({ mobileSidebarOpen: !s.mobileSidebarOpen })),
-  setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
-}));
+    {
+      name: "visoora-workflow-state",
+      storage: createJSONStorage(() => localStorage),
+      // Only persist workflow step progress — all other data is fetched live from the API
+      partialize: (state) => ({
+        currentWorkflowStep: state.currentWorkflowStep,
+        highestCompletedStep: state.highestCompletedStep,
+      }),
+    }
+  )
+);
