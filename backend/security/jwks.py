@@ -86,8 +86,9 @@ jwk_service = JWKService(jwks_url=settings.supabase_jwks_url)
 
 async def verify_supabase_jwt(token: str) -> Dict[str, Any]:
     """
-    Decodes and verifies a Supabase-issued Bearer JWT.
-    Enforces expiration, audience, issuer validation, and signature verification.
+    Validates a Supabase-issued Bearer JWT by querying the Gotrue server directly 
+    using the Supabase Admin Client. This bypasses the need for a JWKS endpoint 
+    which is not exposed in standard Supabase projects.
     """
     # ── Development & Testing Fallback ──────────────────────────────
     if settings.app_env in ("development", "test"):
@@ -99,41 +100,27 @@ async def verify_supabase_jwt(token: str) -> Dict[str, Any]:
                 audience="authenticated"
             )
             return payload
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationException("Session expired. Please log in again.")
         except Exception:
             pass
 
     try:
-        # Extract headers first without verification to find Key ID (KID)
-        unverified_headers = jwt.get_unverified_header(token)
-        kid = unverified_headers.get("kid")
-        if not kid:
-            raise AuthenticationException("Invalid token format: Key ID (KID) header is missing.")
+        from server.storage_manager import supabase_admin_client
+        # supabase.auth.get_user(token) securely verifies the token via network request to Gotrue
+        user_resp = supabase_admin_client.auth.get_user(token)
+        if not user_resp or not user_resp.user:
+            raise AuthenticationException("Invalid or expired session.")
             
-        # Dynamically retrieve verified cryptographic public key
-        public_key = await jwk_service.get_public_key(kid)
+        user = user_resp.user
         
-        # Decode and verify token
-        # Supabase default audience is 'authenticated'
-        payload = jwt.decode(
-            token,
-            public_key,
-            algorithms=["RS256"],
-            options={"verify_aud": True, "verify_iss": False}, # Let aud be validated but skip strict URL match for local testing
-            audience="authenticated"
-        )
-        return payload
-        
-    except ExpiredSignatureError:
-        logger.warn("jwt_expired", message="JWT signature has expired.")
-        raise AuthenticationException("Session expired. Please log in again.")
-    except InvalidSignatureError:
-        logger.error("jwt_invalid_signature", message="JWT signature verification failed.")
-        raise AuthenticationException("Cryptographic signature verification failed.")
-    except InvalidTokenError as e:
-        logger.error("jwt_invalid_token", message="JWT token parsing failed.", error=str(e))
-        raise AuthenticationException("Malformed or corrupted authentication token.")
+        # Reconstruct the payload dictionary expected by RBAC
+        return {
+            "sub": user.id,
+            "email": user.email,
+            "app_metadata": user.app_metadata or {},
+            "user_metadata": user.user_metadata or {},
+            "role": user.role
+        }
+
     except Exception as e:
-        logger.error("jwt_verification_unknown_error", message="Unhandled exception verifying token.", error=str(e))
+        logger.error("jwt_verification_unknown_error", message="Unhandled exception verifying token via Supabase get_user.", error=str(e))
         raise AuthenticationException("Authentication processing error.")
