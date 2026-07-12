@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useAuthStore } from "../auth/store";
+import { toast } from "sonner";
 
 function SignupContent() {
   const router = useRouter();
@@ -29,28 +30,26 @@ function SignupContent() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
     if (!name || !email || !password || !confirmPassword) {
-      setError("Please fill out all fields.");
+      toast.error("Please fill out all fields.");
       return;
     }
     if (!email.includes("@")) {
-      setError("Please enter a valid email address.");
+      toast.error("Please enter a valid email address.");
       return;
     }
     if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+      toast.error("Password must be at least 6 characters long.");
       return;
     }
     if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+      toast.error("Passwords do not match.");
       return;
     }
 
@@ -63,6 +62,7 @@ function SignupContent() {
       setIsLoading(false);
       if (result && typeof result === 'object' && result.success) {
         setIsSuccess(true);
+        toast.success("Account created successfully!");
         // Redirect to onboarding after showing success state
         setTimeout(() => {
           if (reportId) {
@@ -74,13 +74,13 @@ function SignupContent() {
       } else {
         // Log the real error to the console for debugging
         console.error("Signup failed:", result?.error);
-        setError(
+        toast.error(
           result?.error || "Registration failed. Please check credentials and try again."
         );
       }
     } catch (err: any) {
       setIsLoading(false);
-      setError(err?.message || "Registration failed. Please try again.");
+      toast.error(err?.message || "Registration failed. Please try again.");
     }
   };
 
@@ -249,20 +249,6 @@ function SignupContent() {
                     <span>Login</span>
                   </Link>
                 </div>
-
-                {error && (
-                  <div
-                    className="flex items-center gap-2.5 rounded-xl p-3 text-[13px] border mb-5"
-                    style={{
-                      background: "hsla(var(--danger), 0.05)",
-                      borderColor: "hsla(var(--danger), 0.2)",
-                      color: "hsl(var(--danger))",
-                    }}
-                  >
-                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                    <span>{error}</span>
-                  </div>
-                )}
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                   {/* Full Name */}

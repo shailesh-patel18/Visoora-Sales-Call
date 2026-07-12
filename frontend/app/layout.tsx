@@ -2,6 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import { Providers } from "./providers";
 import { LayoutWrapper } from "./components/layout-wrapper";
+import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "Visoora — AI Sales Command Center",
@@ -19,6 +20,7 @@ export default function RootLayout({
       <body suppressHydrationWarning className="min-h-screen antialiased bg-[hsl(var(--surface-0))]">
         <Providers>
           <LayoutWrapper>{children}</LayoutWrapper>
+          <Toaster richColors position="top-right" theme="dark" />
         </Providers>
       </body>
     </html>

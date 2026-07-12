@@ -17,6 +17,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { useAuthStore } from "../auth/store";
+import { toast } from "sonner";
 
 function LoginContent() {
   const router = useRouter();
@@ -27,19 +28,17 @@ function LoginContent() {
   const [email, setEmail] = useState("admin@visoora.com");
   const [password, setPassword] = useState("Visoora@2024");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
 
     if (!email) {
-      setError("Please enter your email address.");
+      toast.error("Please enter your email address.");
       return;
     }
     if (!password) {
-      setError("Please enter your password.");
+      toast.error("Please enter your password.");
       return;
     }
 
@@ -51,6 +50,7 @@ function LoginContent() {
       const success = await login(email, password);
       setIsLoading(false);
       if (success) {
+        toast.success("Welcome back!");
         if (reportId) {
           router.push(`/activation?report_id=${reportId}`);
         } else {
@@ -59,11 +59,11 @@ function LoginContent() {
         // Ensure Next.js refreshes page cookies
         router.refresh();
       } else {
-        setError("Invalid email or password credentials.");
+        toast.error("Invalid email or password credentials.");
       }
     } catch (err: any) {
       setIsLoading(false);
-      setError(err?.message || "Authentication failed. Please try again.");
+      toast.error(err?.message || "Authentication failed. Please try again.");
     }
   };
 
@@ -212,20 +212,6 @@ function LoginContent() {
               </p>
             </div>
           </div>
-
-          {error && (
-            <div
-              className="flex items-center gap-2.5 rounded-xl p-3 text-[13px] border mb-5"
-              style={{
-                background: "hsla(var(--danger), 0.05)",
-                borderColor: "hsla(var(--danger), 0.2)",
-                color: "hsl(var(--danger))",
-              }}
-            >
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Email Input */}

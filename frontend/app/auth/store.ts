@@ -112,7 +112,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       if (error) {
         console.error("AuthStore signup error:", error);
-        return { success: false, error: error.message };
+        const errorMsg = typeof error === 'string' ? error : (error.message || JSON.stringify(error));
+        return { success: false, error: errorMsg };
       }
 
       return { success: true };
