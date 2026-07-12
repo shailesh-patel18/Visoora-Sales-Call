@@ -127,7 +127,9 @@ def spawn_ready_tasks():
     Finds pending tasks where all dependencies are successful, and marks them as ready/running.
     """
     if not supabase_client:
-        return
+        return False
+        
+    spawned_any = False
         
     res = supabase_client.table("mission_tasks").select("*, missions!inner(tenant_id)").eq("status", "pending").execute()
     for task_data in res.data:
@@ -147,6 +149,9 @@ def spawn_ready_tasks():
                     "updated_at": datetime.datetime.utcnow().isoformat()
                 }
                 supabase_client.table("workflow_jobs").insert(job_data).execute()
+                spawned_any = True
                 
             logger.info("task_ready_for_execution", task_id=task.id, agent_type=task.agent_type)
             emit_mission_event(task.mission_id, "task_ready", task.id, {"agent_type": task.agent_type})
+
+    return spawned_any

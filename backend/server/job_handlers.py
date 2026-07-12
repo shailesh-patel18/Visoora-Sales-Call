@@ -127,6 +127,37 @@ async def website_analysis_handler(payload: dict, job_id: str) -> dict:
 # Register Phase 1 handler
 register_job_handler("website_analysis", website_analysis_handler)
 
+async def icp_generation_handler(payload: dict, job_id: str) -> dict:
+    update_job_step(job_id, "icp_generation", "running")
+    # Simulate processing time for ICP generation (so UI shows "Generating...")
+    await asyncio.sleep(4)
+    
+    tenant_id = payload.get("agent_config", {}).get("tenant_id")
+    segments = payload.get("agent_config", {}).get("icp_segments", [])
+    
+    if supabase_client and tenant_id and segments:
+        try:
+            # Delete old segments
+            supabase_client.table("icp_segments").delete().eq("tenant_id", tenant_id).execute()
+            # Insert new ones
+            for idx, seg in enumerate(segments):
+                supabase_client.table("icp_segments").insert({
+                    "tenant_id": tenant_id,
+                    "segment": seg.get("segment", f"Segment {idx+1}"),
+                    "rationale": seg.get("rationale", ""),
+                    "confidence": seg.get("confidence", 90),
+                    "created_at": datetime.datetime.utcnow().isoformat()
+                }).execute()
+        except Exception as e:
+            logger.error("failed_to_save_icp_segments", error=str(e))
+            update_job_step(job_id, "icp_generation", "failed")
+            raise e
+            
+    update_job_step(job_id, "icp_generation", "success")
+    return {"status": "success", "segments_created": len(segments)}
+
+register_job_handler("icp_generation", icp_generation_handler)
+
 # ----------------------------------------------------
 # Phase 3: Mission Engine Agent Handlers
 # ----------------------------------------------------

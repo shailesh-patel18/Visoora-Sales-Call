@@ -33,6 +33,9 @@ export async function analyzeDomain(website: string): Promise<AnalyzeDomainRespo
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    if (typeof errorData.detail === 'object' && errorData.detail !== null) {
+      throw new Error(JSON.stringify(errorData.detail));
+    }
     throw new Error(errorData.detail || "Failed to analyze domain");
   }
 

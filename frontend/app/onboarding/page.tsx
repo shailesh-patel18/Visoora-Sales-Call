@@ -15,7 +15,7 @@ export default function V3OnboardingPage() {
   const [step, setStep] = useState<OnboardingStep>("input_url");
   const [url, setUrl] = useState("");
   const [brainData, setBrainData] = useState<AnalyzeDomainResponse | null>(null);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [analysisError, setAnalysisError] = useState<{message: string, type: string} | null>(null);
   const [isFinished, setIsFinished] = useState(false);
   const { user } = useAuthStore();
 
@@ -34,8 +34,36 @@ export default function V3OnboardingPage() {
       setIsFinished(true); // Triggers SkeletonAnalyzer to finish
     } catch (err: any) {
       console.error(err);
-      setAnalysisError(err.message || "Failed to analyze website");
+      let errorMsg = "Failed to analyze website. Please try a different URL or use manual entry.";
+      let errorType = "unknown";
+      try {
+        const parsed = JSON.parse(err.message);
+        if (parsed.message) {
+          errorMsg = parsed.message;
+          errorType = parsed.error_type;
+        }
+      } catch (e) {
+        errorMsg = err.message || errorMsg;
+      }
+      setAnalysisError({ message: errorMsg, type: errorType });
     }
+  };
+
+  const handleManualFallback = () => {
+    // Generate a default empty Brain Data for manual entry
+    setBrainData({
+      company_name: { value: "", confidence: 0, snippet: "Manual Entry", source_url: "N/A" },
+      company_description: { value: "", confidence: 0, snippet: "Manual Entry", source_url: "N/A" },
+      value_proposition: { value: "", confidence: 0, snippet: "Manual Entry", source_url: "N/A" },
+      estimated_industries: [],
+      estimated_regions: [],
+      estimated_decision_makers: [],
+      potential_competitors: [],
+      potential_objections: [],
+      suggested_segments: [],
+      brand_voice_tone: { value: "Professional and direct", confidence: 100, snippet: "Default", source_url: "N/A" }
+    });
+    setStep("confirming_brain");
   };
 
   const handleConfirmBrain = async () => {
@@ -125,16 +153,27 @@ export default function V3OnboardingPage() {
             <SkeletonAnalyzer 
               onComplete={() => setStep("confirming_brain")} 
               isFinished={isFinished}
-              error={analysisError}
+              error={analysisError?.message}
             />
             {analysisError && (
-              <div className="mt-6 text-center">
-                <button 
-                  onClick={() => setStep("input_url")}
-                  className="text-sm text-gray-400 hover:text-white"
-                >
-                  Go Back
-                </button>
+              <div className="mt-8 flex flex-col items-center gap-4">
+                <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-center max-w-md">
+                  <p className="text-red-400 text-sm">{analysisError.message}</p>
+                </div>
+                <div className="flex gap-4">
+                  <button 
+                    onClick={() => setStep("input_url")}
+                    className="px-6 py-2 bg-[#222] hover:bg-[#333] text-white rounded-lg text-sm transition-colors border border-[hsl(var(--border-subtle))]"
+                  >
+                    Try Another URL
+                  </button>
+                  <button 
+                    onClick={handleManualFallback}
+                    className="px-6 py-2 bg-[hsl(var(--brand-primary))] hover:bg-[#00d0e6] text-black font-semibold rounded-lg text-sm transition-colors"
+                  >
+                    Enter Manually
+                  </button>
+                </div>
               </div>
             )}
           </motion.div>

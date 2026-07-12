@@ -693,21 +693,25 @@ async def get_business_map(
 
     # 2. Load ICP Segments
     segments = []
+    icp_job_status = "not_started"
     if get_scoped_supabase_client(user.raw_token):
         try:
             res = get_scoped_supabase_client(user.raw_token).table("icp_segments").select("*").eq("tenant_id", tenant_uuid).execute()
             if res.data:
                 segments = res.data
-        except Exception:
-            pass
-
-
-    # Default segments fallback
-    if not segments:
-        segments = [
-            {"segment": "Healthcare SaaS Startups", "confidence": 94, "rationale": "High contract sizes and complex regulatory needs match your custom engineering focus."},
-            {"segment": "FinTech / Payments Apps", "confidence": 85, "rationale": "Requirement for high-security API integrations aligns with your portfolio."}
-        ]
+                icp_job_status = "success"
+                
+            # Check if there's an active/pending job
+            job_res = get_scoped_supabase_client(user.raw_token).table("workflow_jobs").select("status").eq("tenant_id", tenant_uuid).eq("workflow_type", "icp_generation").order("created_at", desc=True).limit(1).execute()
+            if job_res.data:
+                latest_job_status = job_res.data[0]["status"]
+                if latest_job_status in ["queued", "in_progress", "running"]:
+                    icp_job_status = "generating"
+                elif latest_job_status == "failed":
+                    icp_job_status = "failed"
+        except Exception as e:
+            import structlog
+            structlog.get_logger("analytics_api").error("failed_to_load_icp", error=str(e))
 
     # 3. Load Buyer Personas
     personas = []
@@ -738,13 +742,13 @@ async def get_business_map(
         "Outsourced perception risk in highly regulated sectors"
     ]
 
-    return {
-        "config": config_data,
-        "segments": segments,
-        "personas": personas,
-        "strengths": strengths,
-        "weaknesses": weaknesses
-    }
+    config_data["icp_segments"] = segments
+    config_data["buyer_personas"] = personas
+    config_data["strengths"] = strengths
+    config_data["weaknesses"] = weaknesses
+    config_data["icp_generation_status"] = icp_job_status
+
+    return {"agent_config": config_data}
 
 @analytics_router.get("/missions/timeline")
 async def get_missions_timeline(user: UserPrincipal = Depends(get_current_user)):

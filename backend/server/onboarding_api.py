@@ -93,31 +93,59 @@ async def analyze_domain(payload: AnalyzeRequest, user: UserPrincipal = Depends(
     if not firecrawl_app:
         raise HTTPException(status_code=500, detail="Firecrawl API key is missing or invalid.")
 
-    # 1. Scrape the website
-    try:
-        # Run synchronous firecrawl in a thread pool to avoid blocking async loop
-        scrape_result = await asyncio.to_thread(
-            firecrawl_app.scrape_url,
-            url
-        )
-        
-        # Support both older firecrawl dict returns and newer v1.0.0+ Pydantic Document returns
-        if hasattr(scrape_result, 'model_dump'):
-            scrape_data = scrape_result.model_dump()
-        elif hasattr(scrape_result, 'dict'):
-            scrape_data = scrape_result.dict()
-        else:
-            scrape_data = scrape_result
+    # 1. Scrape the website with retry logic
+    max_retries = 1
+    scrape_data = None
+    last_error = None
+    
+    for attempt in range(max_retries + 1):
+        try:
+            # Run synchronous firecrawl in a thread pool to avoid blocking async loop
+            scrape_result = await asyncio.to_thread(
+                firecrawl_app.scrape_url,
+                url
+            )
             
-        markdown_content = scrape_data.get('markdown', '')
-        metadata = scrape_data.get('metadata') or {}
-        source_url = metadata.get('sourceURL') or metadata.get('source_url') or url
-    except Exception as e:
-        logger.error("firecrawl_scrape_failed", error=str(e), website=url)
-        raise HTTPException(status_code=400, detail=f"Failed to scrape website: {str(e)}")
+            # Support both older firecrawl dict returns and newer v1.0.0+ Pydantic Document returns
+            if hasattr(scrape_result, 'model_dump'):
+                scrape_data = scrape_result.model_dump()
+            elif hasattr(scrape_result, 'dict'):
+                scrape_data = scrape_result.dict()
+            else:
+                scrape_data = scrape_result
+                
+            break  # Success, exit retry loop
+            
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            logger.warning("firecrawl_scrape_attempt_failed", attempt=attempt, error=str(e), website=url)
+            
+            # Don't retry on certain fatal errors like 403 or 404
+            if "403" in error_str or "forbidden" in error_str or "cloudflare" in error_str:
+                logger.error("firecrawl_scrape_blocked", error=str(e), website=url)
+                raise HTTPException(status_code=400, detail={"error_type": "blocked", "message": "This site blocked our reader. Try adding /about or /pricing as a fallback URL, or use the manual fallback."})
+                
+            if "not found" in error_str or "404" in error_str or "dns" in error_str or "name or service not known" in error_str:
+                logger.error("firecrawl_scrape_unreachable", error=str(e), website=url)
+                raise HTTPException(status_code=400, detail={"error_type": "network", "message": "We couldn't reach this website. Please check the URL and try again."})
+                
+            if attempt < max_retries:
+                await asyncio.sleep(3)  # Backoff
+            else:
+                logger.error("firecrawl_scrape_failed_final", error=str(e), website=url)
+                # If it's a timeout
+                if "timeout" in error_str:
+                    raise HTTPException(status_code=400, detail={"error_type": "timeout", "message": "The website took too long to respond. It might be too large or slow."})
+                raise HTTPException(status_code=400, detail={"error_type": "unknown_scrape_error", "message": f"Failed to scrape website: {str(e)}"})
 
-    if not markdown_content:
-        raise HTTPException(status_code=400, detail="Could not extract any content from the website.")
+    markdown_content = scrape_data.get('markdown', '')
+    metadata = scrape_data.get('metadata') or {}
+    source_url = metadata.get('sourceURL') or metadata.get('source_url') or url
+
+    if not markdown_content or len(markdown_content.strip()) < 50:
+        logger.error("firecrawl_scrape_low_content", website=url, content_len=len(markdown_content) if markdown_content else 0)
+        raise HTTPException(status_code=400, detail={"error_type": "low_content", "message": "We read the site but couldn't find enough information to build a profile. Please use the manual fallback to add a quick description instead."})
 
     # 2. Extract structured evidence using LLM
     logger.info("llm_extraction_started", markdown_length=len(markdown_content))
@@ -143,15 +171,35 @@ async def analyze_domain(payload: AnalyzeRequest, user: UserPrincipal = Depends(
         )
         return extraction
     except Exception as e:
-        logger.error("llm_extraction_failed", error=str(e))
-        raise HTTPException(status_code=500, detail="Failed to extract intelligence from website.")
+        logger.error("llm_extraction_failed", error=str(e), tenant_id=user.tenant_id, url=url)
+        raise HTTPException(status_code=500, detail={"error_type": "llm_failure", "message": "Failed to extract intelligence from website via LLM."})
 
 @router.post("/complete")
 async def complete_onboarding(payload: dict, user: UserPrincipal = Depends(get_current_user)):
-    from server.storage_manager import storage
+    from server.storage_manager import storage, supabase_admin_client
+    import uuid
+    import datetime
+    
     logger.info("onboarding_complete_requested", tenant_id=user.tenant_id)
     
     # Store Agent Config
     storage.upsert_agent_config(user.tenant_id, payload)
+    
+    # Enqueue ICP generation job
+    if supabase_admin_client:
+        try:
+            job_data = {
+                "id": str(uuid.uuid4()),
+                "tenant_id": user.tenant_id,
+                "workflow_type": "icp_generation",
+                "status": "queued",
+                "payload": {"agent_config": payload},
+                "created_at": datetime.datetime.utcnow().isoformat(),
+                "updated_at": datetime.datetime.utcnow().isoformat()
+            }
+            supabase_admin_client.table("workflow_jobs").insert(job_data).execute()
+            logger.info("enqueued_icp_generation", tenant_id=user.tenant_id, job_id=job_data["id"])
+        except Exception as e:
+            logger.error("failed_to_enqueue_icp_job", error=str(e), tenant_id=user.tenant_id)
     
     return {"status": "success"}

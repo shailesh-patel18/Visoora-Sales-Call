@@ -50,8 +50,15 @@ def get_scoped_supabase_client(raw_token: str) -> Optional[Client]:
     This naturally enforces Row-Level Security (RLS) on all queries.
     """
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        print("[Storage Manager] Warning: SUPABASE_URL or SUPABASE_ANON_KEY is missing. Cannot create scoped client.")
-        return None
+        import sys
+        print("\n" + "="*80)
+        print("🚨 CRITICAL ERROR: SUPABASE_URL or SUPABASE_ANON_KEY is missing!")
+        print("The backend cannot create scoped DB clients for authenticated users.")
+        print("Check your .env file or deployment secrets.")
+        print("="*80 + "\n")
+        # Fail fast instead of silently polling and failing later
+        sys.exit(1)
+        
     options = ClientOptions(headers={"Authorization": f"Bearer {raw_token}"})
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=options)
 

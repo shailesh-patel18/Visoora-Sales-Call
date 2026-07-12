@@ -48,7 +48,7 @@ async def process_next_job():
                 .execute()
             
             if not res.data:
-                return
+                return False
             
             job = res.data[0]
             job_id = job["id"]
@@ -62,7 +62,7 @@ async def process_next_job():
                 supabase_admin_client.table("workflow_jobs")\
                     .update({"status": "failed", "error": "Missing tenant_id — rejected for safety"})\
                     .eq("id", job_id).execute()
-                return
+                return False
 
             # Inject tenant_id into payload so handlers always have it
             payload["tenant_id"] = tenant_id
@@ -79,7 +79,7 @@ async def process_next_job():
             
             if not claim_res.data:
                 # Job was claimed by another worker
-                return
+                return False
             
             logger.info("job_claimed_db", job_id=job_id, workflow_type=workflow_type, tenant_id=tenant_id)
             
@@ -127,21 +127,60 @@ async def process_next_job():
                     })\
                     .eq("id", job_id)\
                     .execute()
-            return
+            return True
         except Exception as e:
             logger.error("db_worker_iteration_failed", error=str(e))
+            return False
+    return False
+
+def recover_stuck_jobs():
+    """Finds jobs stuck in 'running' state for > 5 minutes and resets them."""
+    if not supabase_admin_client:
+        return
+    try:
+        five_mins_ago = (datetime.datetime.utcnow() - datetime.timedelta(minutes=5)).isoformat()
+        res = supabase_admin_client.table("workflow_jobs")\
+            .update({"status": "queued", "error": "Reset after being stuck in running state"})\
+            .eq("status", "running")\
+            .lt("updated_at", five_mins_ago)\
+            .execute()
+        if res.data:
+            logger.info("recovered_stuck_jobs", count=len(res.data))
+    except Exception as e:
+        logger.error("failed_recovering_stuck_jobs", error=str(e))
 
 async def run_worker_loop():
-    """Runs a continuous background execution loop with 1.0s delay."""
+    """Runs a continuous background execution loop with exponential backoff (1.0s to 15.0s)."""
     logger.info("worker_loop_start", message="Visoora background job worker started.")
+    poll_interval = 1.0
+    last_recovery_time = datetime.datetime.utcnow()
+
     while True:
         try:
-            await process_next_job()
+            # 1. Recover stuck jobs periodically (every ~1 minute)
+            now = datetime.datetime.utcnow()
+            if (now - last_recovery_time).total_seconds() > 60:
+                recover_stuck_jobs()
+                last_recovery_time = now
+
+            # 2. Process next workflow job
+            job_processed = await process_next_job()
+            
+            # 3. Spawn tasks whose dependencies are met
             from server.services.mission_engine import spawn_ready_tasks
-            spawn_ready_tasks()
+            tasks_spawned = spawn_ready_tasks()
+            
+            # 4. Exponential backoff
+            if job_processed or tasks_spawned:
+                poll_interval = 1.0
+            else:
+                poll_interval = min(poll_interval * 1.5, 15.0)
+                
         except Exception as e:
             logger.error("worker_loop_error", error=str(e))
-        await asyncio.sleep(1.0)
+            poll_interval = min(poll_interval * 2.0, 15.0)
+            
+        await asyncio.sleep(poll_interval)
 
 async def start_background_worker():
     """Starts the background loop as an un-awaited background task."""

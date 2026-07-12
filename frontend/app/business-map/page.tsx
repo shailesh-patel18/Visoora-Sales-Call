@@ -10,6 +10,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { useCRMStore } from "../store";
 import { useRouter } from "next/navigation";
+import EvidenceCard from "../components/evidence-card";
 
 export default function BusinessBrainPage() {
   const [activeTab, setActiveTab] = useState<"knowledge" | "memory">("knowledge");
@@ -103,31 +104,50 @@ export default function BusinessBrainPage() {
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <Zap className="w-5 h-5 text-yellow-500" /> Core Identity
                 </h3>
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase">Industry</label>
-                    <p className="text-gray-200 mt-1">AI Development Agency</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase">Average ACV</label>
-                    <p className="text-gray-200 mt-1">$18,000</p>
-                  </div>
-                  <div>
-                    <label className="text-xs font-semibold text-gray-500 uppercase">Value Proposition</label>
-                    <p className="text-gray-300 text-sm mt-1">Helping companies accelerate product roadmaps with dedicated AI engineering pods and custom LLM integrations.</p>
-                  </div>
+                <div className="space-y-1">
+                  <EvidenceCard 
+                    title="Industry / Description" 
+                    field={brainData?.company_description?.value ? brainData.company_description : { value: brainData?.company_description || "N/A", confidence: 0, snippet: "Manual Entry", source_url: "" }} 
+                  />
+                  <EvidenceCard 
+                    title="Value Proposition" 
+                    field={brainData?.value_proposition?.value ? brainData.value_proposition : { value: brainData?.value_proposition || "N/A", confidence: 0, snippet: "Manual Entry", source_url: "" }} 
+                  />
+                  <EvidenceCard 
+                    title="Brand Tone" 
+                    field={brainData?.brand_voice_tone?.value ? brainData.brand_voice_tone : { value: brainData?.brand_voice_tone || "N/A", confidence: 0, snippet: "Manual Entry", source_url: "" }} 
+                  />
                 </div>
               </div>
 
               {/* Competitors */}
               <div className="bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl p-6 shadow-md">
                 <h3 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-                  <ShieldAlert className="w-5 h-5 text-red-500" /> Competitors
+                  <ShieldAlert className="w-5 h-5 text-red-500" /> Competitors & Objections
                 </h3>
-                <div className="flex flex-wrap gap-2">
-                  <span className="px-3 py-1.5 bg-white/5 border border-[hsl(var(--border-subtle))] rounded-lg text-sm text-gray-300">Clay</span>
-                  <span className="px-3 py-1.5 bg-white/5 border border-[hsl(var(--border-subtle))] rounded-lg text-sm text-gray-300">11x</span>
-                  <span className="px-3 py-1.5 bg-white/5 border border-[hsl(var(--border-subtle))] rounded-lg text-sm text-gray-300">DevSquad</span>
+                <div className="space-y-1">
+                  <EvidenceCard 
+                    title="Known Competitors" 
+                    field={brainData?.potential_competitors?.value ? brainData.potential_competitors : { value: brainData?.competitors || [], confidence: 0, snippet: "Manual Entry", source_url: "" }}
+                    renderValue={(val) => (
+                      <div className="flex flex-wrap gap-2">
+                        {Array.isArray(val) && val.map((c: string, i: number) => (
+                          <span key={i} className="px-3 py-1 bg-white/5 border border-[hsl(var(--border-subtle))] rounded-lg text-sm text-gray-300">{c}</span>
+                        ))}
+                      </div>
+                    )}
+                  />
+                  <EvidenceCard 
+                    title="Common Objections" 
+                    field={brainData?.potential_objections?.value ? brainData.potential_objections : { value: brainData?.objections_list || [], confidence: 0, snippet: "Manual Entry", source_url: "" }}
+                    renderValue={(val) => (
+                      <ul className="list-disc pl-4 text-sm text-gray-300 space-y-1">
+                        {Array.isArray(val) && val.map((obj: string, i: number) => (
+                          <li key={i}>{obj}</li>
+                        ))}
+                      </ul>
+                    )}
+                  />
                 </div>
               </div>
             </div>
@@ -140,7 +160,13 @@ export default function BusinessBrainPage() {
                 </h3>
                 
                 <div className="space-y-4">
-                  {brainData?.icp_segments && brainData.icp_segments.length > 0 ? (
+                  {brainData?.icp_generation_status === "generating" ? (
+                    <div className="p-8 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))] flex flex-col items-center justify-center gap-4">
+                      <div className="w-8 h-8 border-4 border-[#00F0FF] border-t-transparent rounded-full animate-spin"></div>
+                      <p className="text-sm text-gray-300 font-semibold animate-pulse">Generating ICP Segments...</p>
+                      <p className="text-xs text-gray-500">This usually takes about 10 seconds.</p>
+                    </div>
+                  ) : brainData?.icp_segments && brainData.icp_segments.length > 0 ? (
                     brainData.icp_segments.map((icp: any, idx: number) => (
                       <div key={idx} className="p-4 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))]">
                         <h4 className="font-semibold text-white">{idx + 1}. {icp.segment || "Unnamed ICP Segment"}</h4>
@@ -159,8 +185,31 @@ export default function BusinessBrainPage() {
                       </div>
                     ))
                   ) : (
-                    <div className="p-4 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))]">
-                      <p className="text-xs text-gray-400 mb-3">No ICP Segments generated yet. They will be generated based on your Business Brain.</p>
+                    <div className="p-6 bg-[#1a1a1a] rounded-xl border border-[hsl(var(--border-subtle))] flex flex-col items-center justify-center text-center gap-4">
+                      <p className="text-sm text-gray-400">No ICP Segments generated yet.</p>
+                      {brainData?.icp_generation_status === "failed" && (
+                        <p className="text-xs text-red-400">The generation process failed.</p>
+                      )}
+                      <button 
+                        onClick={async () => {
+                           // Trigger manual ICP generation
+                           const res = await fetch(`${BACKEND_URL}/api/onboarding/complete`, {
+                             method: "POST",
+                             headers: {
+                               ...getAuthHeaders(),
+                               "Content-Type": "application/json",
+                             },
+                             body: JSON.stringify(brainData)
+                           });
+                           if (res.ok) {
+                             // Reload data after 1 sec
+                             setTimeout(() => window.location.reload(), 1000);
+                           }
+                        }}
+                        className="px-4 py-2 bg-[#00F0FF]/10 text-[#00F0FF] border border-[#00F0FF]/30 rounded-lg hover:bg-[#00F0FF]/20 transition-colors text-sm font-semibold"
+                      >
+                        Generate ICP Now
+                      </button>
                     </div>
                   )}
 
