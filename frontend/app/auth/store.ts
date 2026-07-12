@@ -28,7 +28,7 @@ interface AuthState {
   token: string | null;
   login: (email: string, password?: string) => Promise<boolean>;
   logout: () => Promise<void>;
-  signup: (name: string, email: string, password?: string) => Promise<boolean>;
+  signup: (name: string, email: string, password?: string) => Promise<{ success: boolean; error?: string }>;
   checkSession: () => Promise<void>;
 }
 
@@ -106,21 +106,19 @@ export const useAuthStore = create<AuthState>((set) => ({
           data: {
             full_name: name,
             role: "admin",
-            // Note: in a real app, tenant_id should be securely assigned by the backend
-            // after email verification, not directly accepted from client.
           }
         }
       });
 
       if (error) {
         console.error("AuthStore signup error:", error);
-        return false;
+        return { success: false, error: error.message };
       }
 
-      return true;
-    } catch (err) {
+      return { success: true };
+    } catch (err: any) {
       console.error("AuthStore signup exception:", err);
-      return false;
+      return { success: false, error: err?.message || "An unexpected error occurred" };
     }
   },
 }));

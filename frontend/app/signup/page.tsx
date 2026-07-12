@@ -59,9 +59,9 @@ function SignupContent() {
     try {
       // Simulate premium micro-animation delay
       await new Promise((resolve) => setTimeout(resolve, 500));
-      const success = await signup(name, email, password);
+      const result = await signup(name, email, password);
       setIsLoading(false);
-      if (success) {
+      if (result && typeof result === 'object' && result.success) {
         setIsSuccess(true);
         // Redirect to onboarding after showing success state
         setTimeout(() => {
@@ -72,8 +72,10 @@ function SignupContent() {
           }
         }, 1800);
       } else {
+        // Log the real error to the console for debugging
+        console.error("Signup failed:", result?.error);
         setError(
-          "Registration failed. Please check credentials and try again."
+          result?.error || "Registration failed. Please check credentials and try again."
         );
       }
     } catch (err: any) {
