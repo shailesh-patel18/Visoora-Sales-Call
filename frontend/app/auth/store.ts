@@ -112,7 +112,11 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       if (error) {
         console.error("AuthStore signup error:", error);
-        const errorMsg = typeof error === 'string' ? error : (error.message || JSON.stringify(error));
+        let errorMsg = error.message || error.error_description;
+        if (!errorMsg && typeof error === 'string') errorMsg = error;
+        if (!errorMsg || errorMsg === "{}" || errorMsg === "[object Object]") {
+          errorMsg = "Registration failed: User already registered or email unavailable.";
+        }
         return { success: false, error: errorMsg };
       }
 
