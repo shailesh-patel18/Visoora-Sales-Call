@@ -45,8 +45,8 @@ export default function OnboardingLayout({
 
       {/* Header bar */}
       <header
-        className="glass sticky top-0 z-40 flex items-center justify-between px-6 py-4 border-b"
-        style={{ borderColor: "hsl(var(--border-subtle))" }}
+        className="sticky top-0 z-40 flex items-center justify-between px-6 py-4 border-b"
+        style={{ borderColor: "hsl(var(--border-subtle))", background: "hsl(var(--surface-0))" }}
       >
         <div className="flex items-center gap-3">
           <div
