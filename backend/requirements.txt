@@ -5,6 +5,7 @@ pydantic>=2.13.3
 httpx>=0.26.0
 python-dotenv>=1.0.0
 websockets>=15.0.1
+sse-starlette>=2.0.0
 twilio>=9.0.0
 stripe>=7.0.0
 structlog>=24.1.0
