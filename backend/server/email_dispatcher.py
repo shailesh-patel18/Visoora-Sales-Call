@@ -82,12 +82,36 @@ async def email_dispatch_handler(payload: dict, **kwargs) -> dict:
         - from_email: str (optional, falls back to SENDGRID_FROM_EMAIL)
     """
     tenant_id = payload.get("tenant_id")
-    draft_id = payload.get("draft_id")
+    draft_id = payload.get("draft_id") or payload.get("artifact_id")
     to_email = payload.get("to_email")
     subject = payload.get("subject")
     body = payload.get("body")
     from_email = payload.get("from_email") or SENDGRID_FROM_EMAIL
 
+    if draft_id and not (to_email and subject and body):
+        try:
+            from server.storage_manager import supabase_admin_client
+            # First try v2 drafts
+            res = supabase_admin_client.table("email_drafts").select("*").eq("id", draft_id).execute()
+            if res.data:
+                draft_data = res.data[0]
+                to_email = to_email or draft_data.get("prospect_email")
+                subject = subject or draft_data.get("subject")
+                body = body or draft_data.get("body")
+            else:
+                # Try v1 artifacts
+                art_res = supabase_admin_client.table("mission_artifacts").select("*").eq("id", draft_id).execute()
+                if art_res.data:
+                    artifact = art_res.data[0]
+                    to_email = to_email or artifact.get("prospect_email")
+                    subject = subject or artifact.get("email_subject") or "Introduction"
+                    body = body or artifact.get("email_body") or ""
+                    
+                    if not to_email:
+                        name_part = (artifact.get("prospect_name") or "prospect").replace(" ", ".").lower()
+                        to_email = f"{name_part}@example.com"
+        except Exception as e:
+            logger.warn("failed_to_fetch_draft_data", draft_id=draft_id, error=str(e))
     if not tenant_id:
         raise ValueError("Missing required parameter: 'tenant_id'")
     if not to_email:

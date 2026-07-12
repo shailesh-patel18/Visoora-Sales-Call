@@ -14,6 +14,7 @@ class SecuritySettings(BaseModel):
     """
     # Supabase Auth
     supabase_url: str = Field(default_factory=lambda: os.getenv("SUPABASE_URL", ""))
+    supabase_key: str = Field(default_factory=lambda: os.getenv("SUPABASE_KEY", os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")))
     supabase_jwks_url: str = Field(default_factory=lambda: os.getenv(
         "SUPABASE_JWKS_URL", 
         f"{os.getenv('SUPABASE_URL', '').rstrip('/')}/auth/v1/jwks" if os.getenv("SUPABASE_URL") else ""
