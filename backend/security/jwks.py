@@ -53,7 +53,8 @@ class JWKService:
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(self.jwks_url)
+                headers = {"apikey": settings.supabase_key} if getattr(settings, 'supabase_key', None) else {}
+                response = await client.get(self.jwks_url, headers=headers)
                 if response.status_code != 200:
                     logger.error("jwks_fetch_http_error", message="Failed to fetch JWKS from Supabase.", status_code=response.status_code)
                     raise AuthenticationException("Internal system authentication failure (JWKS fetch error).")
