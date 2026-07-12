@@ -5,7 +5,12 @@ from security.rbac import get_current_user, UserPrincipal
 from security.config import settings
 import structlog
 import asyncio
-from firecrawl import FirecrawlApp
+
+try:
+    from firecrawl import FirecrawlApp
+except ImportError:
+    FirecrawlApp = None
+
 from openai import AsyncOpenAI
 import instructor
 
@@ -23,14 +28,21 @@ def resolve_tenant_uuid(tenant_id: str) -> str:
 
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
 
-# Firecrawl & OpenAI Setup
-try:
-    firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
-except Exception as e:
-    logger.error("firecrawl_init_failed", error=str(e))
-    firecrawl_app = None
+# Firecrawl & OpenAI Setup (lazy — safe for CI/test environments without keys)
+firecrawl_app = None
+if FirecrawlApp and getattr(settings, 'firecrawl_api_key', None):
+    try:
+        firecrawl_app = FirecrawlApp(api_key=settings.firecrawl_api_key)
+    except Exception as e:
+        logger.error("firecrawl_init_failed", error=str(e))
 
-aclient = instructor.from_openai(AsyncOpenAI(api_key=settings.openai_api_key))
+aclient = None
+_openai_key = getattr(settings, 'openai_api_key', None)
+if _openai_key:
+    try:
+        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
+    except Exception as e:
+        logger.error("instructor_init_failed", error=str(e))
 
 class AnalyzeRequest(BaseModel):
     website: str
