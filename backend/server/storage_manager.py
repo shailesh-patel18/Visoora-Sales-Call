@@ -18,6 +18,19 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
+from security.config import settings
+
+# TASK 1: Hard boot-time check
+if settings.app_env not in ("development", "test"):
+    if not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        import sys
+        print("\n" + "="*80)
+        print("🚨 CRITICAL ERROR: SUPABASE_URL or SUPABASE_ANON_KEY is missing!")
+        print("The backend cannot create scoped DB clients for authenticated users.")
+        print("Check your .env file or deployment secrets.")
+        print("="*80 + "\n")
+        sys.exit(1)
+
 # Initialize client only if variables are loaded to avoid startup crashes
 supabase_admin_client: Optional[Client] = None
 if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
@@ -50,14 +63,14 @@ def get_scoped_supabase_client(raw_token: str) -> Optional[Client]:
     This naturally enforces Row-Level Security (RLS) on all queries.
     """
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        import sys
-        print("\n" + "="*80)
-        print("🚨 CRITICAL ERROR: SUPABASE_URL or SUPABASE_ANON_KEY is missing!")
-        print("The backend cannot create scoped DB clients for authenticated users.")
-        print("Check your .env file or deployment secrets.")
-        print("="*80 + "\n")
-        # Fail fast instead of silently polling and failing later
-        sys.exit(1)
+        from security.config import settings
+        if settings.app_env in ("development", "test"):
+            return None
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=500, 
+            detail="Missing Supabase configuration. Cannot create scoped client."
+        )
         
     options = ClientOptions(headers={"Authorization": f"Bearer {raw_token}"})
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=options)
