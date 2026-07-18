@@ -223,9 +223,6 @@ export default function InboxPage() {
   };
 
   const meta = selected?.metadata;
-  const personalization = meta?.personalization_score ?? selected?.confidence ?? 90;
-  const brainMatch = meta?.business_brain_match ?? 90;
-  const spamRisk = meta?.spam_risk ?? "Low";
   const versions = meta?.versions ?? [];
   const originalBody = versions.length > 0 ? versions[0].body : (selected?.email_body || "");
   const readTime = readingTimeSec(editedBody);
@@ -344,7 +341,7 @@ export default function InboxPage() {
                   <span className="flex items-center gap-1"><User className="w-3 h-3" /> To: <span className="text-gray-300 ml-1">{selected.prospect_name}</span></span>
                   <span className="flex items-center gap-1"><Building className="w-3 h-3" /> {selected.company_name}</span>
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> ~{readTime}s read</span>
-                  <SpamBadge risk={spamRisk} />
+
                   {isSaving && <span className="text-gray-600 italic">Saving…</span>}
                   {isDirty && !isSaving && <span className="text-[#10B981]">● Edited</span>}
                 </div>
