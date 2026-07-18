@@ -176,15 +176,15 @@ class AIGateway:
         import time
         start_time = time.time()
         
-        _openai_key = os.getenv('OPENAI_API_KEY')
-        if not _openai_key:
-            raise ValueError("OPENAI_API_KEY is not set. Cannot run LIVE extraction.")
+        _google_key = os.getenv('GOOGLE_API_KEY')
+        if not _google_key:
+            raise ValueError("GOOGLE_API_KEY is not set. Cannot run LIVE extraction.")
             
-        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
+        aclient = instructor.from_openai(AsyncOpenAI(api_key=_google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"))
         
         try:
             extraction = await aclient.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gemini-1.5-flash",
                 response_model=AnalyzeDomainResponse,
                 messages=[
                     {
@@ -204,7 +204,7 @@ class AIGateway:
             )
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="openai", model="gpt-4o-mini", latency_ms=latency)
+            self._log_cost(provider="gemini", model="gemini-1.5-flash", latency_ms=latency)
             
             # 4. Write to Cache
             await self._write_cache(url_hash, url, extraction.model_dump())
@@ -236,8 +236,8 @@ class AIGateway:
         import time
         start_time = time.time()
         
-        _openai_key = os.getenv('OPENAI_API_KEY')
-        if not _openai_key:
+        _google_key = os.getenv('GOOGLE_API_KEY')
+        if not _google_key:
             if self.mock_level == "STATIC":
                 # Static fallback for frontend devs
                 return ICPGenerationResponse(icps=[
@@ -249,13 +249,13 @@ class AIGateway:
                         source_url="https://mock.com"
                     )
                 ])
-            raise ValueError("OPENAI_API_KEY is not set. Cannot run LIVE extraction.")
+            raise ValueError("GOOGLE_API_KEY is not set. Cannot run LIVE extraction.")
             
-        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
+        aclient = instructor.from_openai(AsyncOpenAI(api_key=_google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"))
         
         try:
             extraction = await aclient.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gemini-1.5-flash",
                 response_model=ICPGenerationResponse,
                 messages=[
                     {
@@ -271,7 +271,7 @@ class AIGateway:
             )
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="openai", model="gpt-4o-mini", latency_ms=latency)
+            self._log_cost(provider="gemini", model="gemini-1.5-flash", latency_ms=latency)
             
             return extraction
             
@@ -282,15 +282,15 @@ class AIGateway:
     async def _run_extraction(self, prompt: str, data: dict, response_model: Any, source_url: str) -> Any:
         import time
         start_time = time.time()
-        _openai_key = os.getenv('OPENAI_API_KEY')
-        if not _openai_key:
-            raise ValueError("OPENAI_API_KEY is not set.")
+        _google_key = os.getenv('GOOGLE_API_KEY')
+        if not _google_key:
+            raise ValueError("GOOGLE_API_KEY is not set.")
             
-        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
+        aclient = instructor.from_openai(AsyncOpenAI(api_key=_google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"))
         
         try:
             extraction = await aclient.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gemini-1.5-flash",
                 response_model=response_model,
                 messages=[
                     {
@@ -309,7 +309,7 @@ class AIGateway:
                 ]
             )
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="openai", model="gpt-4o-mini", latency_ms=latency)
+            self._log_cost(provider="gemini", model="gemini-1.5-flash", latency_ms=latency)
             return extraction
         except Exception as e:
             logger.error("ai_gateway_knowledge_extraction_failed", error=str(e))
@@ -340,13 +340,13 @@ class AIGateway:
         """
         import time
         start_time = time.time()
-        _openai_key = os.getenv('OPENAI_API_KEY')
+        _google_key = os.getenv('GOOGLE_API_KEY')
         
         prompt_version = "v2.1"
-        model_name = "gpt-4o"
+        model_name = "gemini-1.5-flash"
         temperature = 0.4
         
-        if not _openai_key:
+        if not _google_key:
             if self.mock_level == "STATIC":
                 mock_draft = GroundedEmailDraft(
                     subject="Quick question", 
@@ -354,9 +354,9 @@ class AIGateway:
                     citations=[EmailCitation(field="Mock", snippet="Mock snippet", source_url="https://mock.com")]
                 )
                 return mock_draft, {"prompt_version": prompt_version, "model": model_name, "temperature": temperature}
-            raise ValueError("OPENAI_API_KEY is not set.")
+            raise ValueError("GOOGLE_API_KEY is not set.")
             
-        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
+        aclient = instructor.from_openai(AsyncOpenAI(api_key=_google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"))
         
         hint_instruction = f"\n\nReviewer instruction: {hint}" if hint else ""
         system_prompt = (
@@ -384,10 +384,11 @@ class AIGateway:
                 ]
             )
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="openai", model=model_name, latency_ms=latency)
+            self._log_cost(provider="gemini", model=model_name, latency_ms=latency)
             return draft, {"prompt_version": prompt_version, "model": model_name, "temperature": temperature}
         except Exception as e:
             logger.error("ai_gateway_email_draft_failed", error=str(e))
             raise
 
 gateway = AIGateway()
+
