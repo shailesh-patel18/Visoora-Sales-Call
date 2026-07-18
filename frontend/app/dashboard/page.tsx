@@ -21,6 +21,10 @@ export default function DashboardPage() {
         leads_researched_count: 0,
         pipeline_value: 0,
         drafts_pending_count: 0,
+        emails_sent: 0,
+        emails_opened: 0,
+        emails_clicked: 0,
+        human_edit_rate: 0,
         ai_briefing: []
     });
 
@@ -247,6 +251,30 @@ export default function DashboardPage() {
                             <div className="bg-black/50 p-4 rounded-xl border border-white/5">
                                 <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Leads Researched</div>
                                 <div className="text-xl font-bold text-white">{revenueData.leads_researched_count}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Outbound Tracking & AI Grounding */}
+                    <div className="bg-[#111] border border-[hsl(var(--border-subtle))] rounded-2xl p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-white mb-4">Outbound Tracking & AI Grounding</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Emails Sent</div>
+                                <div className="text-xl font-bold text-white">{revenueData.emails_sent || 0}</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Opens</div>
+                                <div className="text-xl font-bold text-[#00F0FF]">{revenueData.emails_opened || 0}</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5">
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Clicks</div>
+                                <div className="text-xl font-bold text-purple-400">{revenueData.emails_clicked || 0}</div>
+                            </div>
+                            <div className="bg-black/50 p-4 rounded-xl border border-white/5 relative overflow-hidden">
+                                <div className="absolute top-0 right-0 w-8 h-8 bg-gradient-to-bl from-yellow-500/20 to-transparent"></div>
+                                <div className="text-gray-400 font-medium tracking-wide uppercase text-[10px] mb-2">Human Edit Rate</div>
+                                <div className="text-xl font-bold text-white">{revenueData.human_edit_rate || 0}%</div>
                             </div>
                         </div>
                     </div>

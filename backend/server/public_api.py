@@ -157,3 +157,75 @@ async def get_report(result_id: str):
         
     full_report["report_id"] = result_id
     return full_report
+
+
+@public_router.post("/webhooks/sendgrid")
+async def sendgrid_webhook(request: Request):
+    """
+    Public webhook receiver for SendGrid asynchronous events (opens, clicks, bounces).
+    """
+    from server.storage_manager import supabase_admin_client
+    from server.events.bus import bus
+    import datetime
+
+    if not supabase_admin_client:
+        return {"status": "error", "message": "Database not configured"}
+
+    try:
+        body_bytes = await request.body()
+        events = json.loads(body_bytes)
+        
+        processed = 0
+        for event in events:
+            raw_msg_id = event.get("sg_message_id", "")
+            event_type = event.get("event")
+            
+            # SendGrid affixes .filter to message IDs, we need the base ID
+            base_message_id = raw_msg_id.split(".")[0]
+            if not base_message_id or not event_type:
+                continue
+                
+            # Find the mission_artifact that has this sendgrid_message_id in metadata
+            res = supabase_admin_client.table("mission_artifacts").select("id, tenant_id, metadata")\
+                .contains("metadata", {"sendgrid_message_id": base_message_id}).execute()
+                
+            if not res.data:
+                continue
+                
+            artifact = res.data[0]
+            artifact_id = artifact["id"]
+            tenant_id = artifact["tenant_id"]
+            metadata = artifact.get("metadata") or {}
+            
+            # Initialize or update tracking metrics
+            tracking = metadata.get("tracking", {
+                "opens": 0,
+                "clicks": 0,
+                "bounces": 0,
+                "last_opened_at": None
+            })
+            
+            now_iso = datetime.datetime.utcnow().isoformat()
+            
+            if event_type == "open":
+                tracking["opens"] += 1
+                tracking["last_opened_at"] = now_iso
+                bus.publish("EmailOpened", {"artifact_id": artifact_id, "tenant_id": tenant_id, "timestamp": now_iso})
+            elif event_type == "click":
+                tracking["clicks"] += 1
+                bus.publish("EmailClicked", {"artifact_id": artifact_id, "tenant_id": tenant_id, "url": event.get("url"), "timestamp": now_iso})
+            elif event_type in ["bounce", "dropped", "deferred"]:
+                tracking["bounces"] += 1
+                bus.publish("EmailBounced", {"artifact_id": artifact_id, "tenant_id": tenant_id, "timestamp": now_iso})
+            
+            metadata["tracking"] = tracking
+            
+            # Persist tracking updates
+            supabase_admin_client.table("mission_artifacts").update({"metadata": metadata}).eq("id", artifact_id).execute()
+            logger.info("sendgrid_event_processed", sg_event_type=event_type, artifact_id=artifact_id)
+            processed += 1
+            
+        return {"status": "ok", "processed": processed}
+    except Exception as e:
+        logger.error("sendgrid_webhook_failed", error=str(e))
+        return {"status": "error", "message": str(e)}

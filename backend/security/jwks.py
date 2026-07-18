@@ -100,6 +100,8 @@ async def verify_supabase_jwt(token: str) -> Dict[str, Any]:
                 audience="authenticated"
             )
             return payload
+        except ExpiredSignatureError:
+            raise AuthenticationException("Session expired.")
         except Exception:
             pass
 

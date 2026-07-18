@@ -3,7 +3,7 @@ import uuid
 import asyncio
 from uuid import UUID
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, HTTPException, Header, BackgroundTasks, status, Depends
+from fastapi import APIRouter, HTTPException, Header, BackgroundTasks, status, Depends, UploadFile, File
 import structlog
 from server.storage_manager import supabase_admin_client as supabase_client
 from crm.models import (
@@ -123,6 +123,106 @@ async def list_contacts(user: UserPrincipal = Depends(get_current_user)):
     # Local Fallback
     local_contacts = _load_local_json("local_crm_contacts.json")
     return [c for c in local_contacts if c.get("tenant_id") == tenant_id]
+
+
+@router.post("/contacts/upload")
+async def bulk_upload_contacts(
+    file: UploadFile = File(...),
+    user: UserPrincipal = Depends(get_current_user)
+):
+    """Parses a CSV file and upserts contacts in bulk."""
+    import csv
+    import io
+    import re
+    
+    tenant_id = user.tenant_id
+    content = await file.read()
+    
+    # Decode safely
+    try:
+        decoded = content.decode('utf-8-sig')
+    except Exception:
+        decoded = content.decode('latin-1')
+        
+    reader = csv.DictReader(io.StringIO(decoded))
+    
+    # Normalize headers
+    fieldnames = [f.strip().lower() for f in (reader.fieldnames or [])]
+    reader.fieldnames = fieldnames
+    
+    name_col = next((f for f in fieldnames if "name" in f), None)
+    phone_col = next((f for f in fieldnames if "phone" in f), None)
+    email_col = next((f for f in fieldnames if "email" in f), None)
+    company_col = next((f for f in fieldnames if "company" in f), None)
+    score_col = next((f for f in fieldnames if "score" in f), None)
+    
+    if not name_col or not phone_col:
+        raise HTTPException(status_code=400, detail="CSV must contain a Name and Phone column.")
+        
+    upsert_payload = []
+    
+    for row in reader:
+        name = row.get(name_col, "").strip()
+        phone = row.get(phone_col, "").strip()
+        if not name or not phone:
+            continue
+            
+        # Naive phone normalization to E.164
+        phone_e164 = phone
+        if not phone_e164.startswith("+"):
+            digits = re.sub(r'\D', '', phone)
+            phone_e164 = f"+1{digits}"
+            
+        email = row.get(email_col, "").strip() if email_col else None
+        company = row.get(company_col, "").strip() if company_col else "Independent"
+        
+        try:
+            score = int(row.get(score_col, 50)) if score_col else 50
+        except:
+            score = 50
+            
+        payload = {
+            "id": str(uuid.uuid4()), 
+            "tenant_id": tenant_id,
+            "full_name": name,
+            "name": name,
+            "phone_e164": phone_e164,
+            "phone_number": phone_e164,
+            "email": email or None,
+            "company_name": company,
+            "company": company,
+            "lead_score": score,
+            "lead_source": "csv_import",
+            "tags": ["csv_upload"],
+            "created_at": datetime.datetime.utcnow().isoformat(),
+            "updated_at": datetime.datetime.utcnow().isoformat()
+        }
+        upsert_payload.append(payload)
+        
+    if not upsert_payload:
+        raise HTTPException(status_code=400, detail="No valid rows found to import.")
+        
+    if supabase_client:
+        try:
+            # We assume a unique constraint on (tenant_id, phone_e164) exists for upsert to work.
+            res = supabase_client.table("contacts").upsert(upsert_payload, on_conflict="tenant_id,phone_e164").execute()
+            return {"status": "success", "imported": len(upsert_payload)}
+        except Exception as e:
+            logger.error("api_bulk_upload_db_failed", error=str(e))
+            if settings.app_env not in ("development", "test"):
+                raise HTTPException(status_code=500, detail="Database bulk write error.")
+    
+    # Local Fallback
+    local_contacts = _load_local_json("local_crm_contacts.json")
+    for new_c in upsert_payload:
+        existing = next((c for c in local_contacts if c.get("tenant_id") == tenant_id and c.get("phone_e164") == new_c["phone_e164"]), None)
+        if existing:
+            existing.update(new_c)
+        else:
+            local_contacts.append(new_c)
+            
+    _save_local_json("local_crm_contacts.json", local_contacts)
+    return {"status": "success", "imported": len(upsert_payload)}
 
 
 @router.get("/contacts/{id}", response_model=ContactResponse)

@@ -8,6 +8,12 @@ os.environ["STRIPE_SECRET_KEY"] = "sk_live_test_key_visoora_verify"
 os.environ["STRIPE_WEBHOOK_SECRET"] = "whsec_mock_webhook_secret_visoora"
 os.environ["ANTHROPIC_API_KEY"] = "mock_anthropic_api_key_for_testing"
 
+# Mock Supabase out completely
+os.environ["SUPABASE_URL"] = ""
+os.environ["SUPABASE_KEY"] = ""
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = ""
+os.environ["SUPABASE_ANON_KEY"] = ""
+
 @pytest.fixture(scope="session", autouse=True)
 def shutdown_telemetry():
     yield

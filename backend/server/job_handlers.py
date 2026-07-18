@@ -129,32 +129,56 @@ register_job_handler("website_analysis", website_analysis_handler)
 
 async def icp_generation_handler(payload: dict, job_id: str) -> dict:
     update_job_step(job_id, "icp_generation", "running")
-    # Simulate processing time for ICP generation (so UI shows "Generating...")
-    await asyncio.sleep(4)
     
     tenant_id = payload.get("agent_config", {}).get("tenant_id")
-    segments = payload.get("agent_config", {}).get("icp_segments", [])
+    url = payload.get("agent_config", {}).get("website") or payload.get("agent_config", {}).get("url")
     
-    if supabase_client and tenant_id and segments:
-        try:
-            # Delete old segments
-            supabase_client.table("icp_segments").delete().eq("tenant_id", tenant_id).execute()
-            # Insert new ones
-            for idx, seg in enumerate(segments):
-                supabase_client.table("icp_segments").insert({
-                    "tenant_id": tenant_id,
-                    "segment": seg.get("segment", f"Segment {idx+1}"),
-                    "rationale": seg.get("rationale", ""),
-                    "confidence": seg.get("confidence", 90),
-                    "created_at": datetime.datetime.utcnow().isoformat()
-                }).execute()
-        except Exception as e:
-            logger.error("failed_to_save_icp_segments", error=str(e))
-            update_job_step(job_id, "icp_generation", "failed")
-            raise e
+    if not supabase_client or not tenant_id or not url:
+        update_job_step(job_id, "icp_generation", "failed")
+        raise ValueError("Missing supabase_client, tenant_id, or url in payload")
+
+    try:
+        from server.ai_gateway import gateway
+        
+        # 1. Get the latest Business Brain for this URL from ai_cache
+        norm_url = gateway._normalize_url(url)
+        url_hash = gateway._hash_url(norm_url)
+        
+        cached_brain = await gateway._check_cache(url_hash)
+        if not cached_brain:
+            raise ValueError(f"No verified Business Brain found for {url}. Please run website analysis first.")
             
-    update_job_step(job_id, "icp_generation", "success")
-    return {"status": "success", "segments_created": len(segments)}
+        # 2. Generate ICPs using the Knowledge Engine
+        icp_response = await gateway.generate_icps_from_brain(cached_brain)
+        
+        # 3. Filter and Save
+        verified_segments = []
+        for icp in icp_response.icps:
+            if icp.confidence >= 80:
+                verified_segments.append(icp)
+        
+        # Delete old segments
+        supabase_client.table("icp_segments").delete().eq("tenant_id", tenant_id).execute()
+        
+        # Insert new ones
+        for icp in verified_segments:
+            supabase_client.table("icp_segments").insert({
+                "tenant_id": tenant_id,
+                "segment": icp.segment,
+                "rationale": icp.rationale,
+                "confidence": icp.confidence,
+                "snippet": icp.snippet,
+                "source_url": icp.source_url,
+                "created_at": datetime.datetime.utcnow().isoformat()
+            }).execute()
+            
+        update_job_step(job_id, "icp_generation", "success")
+        return {"status": "success", "segments_created": len(verified_segments)}
+        
+    except Exception as e:
+        logger.error("icp_generation_failed", error=str(e))
+        update_job_step(job_id, "icp_generation", "failed")
+        raise e
 
 register_job_handler("icp_generation", icp_generation_handler)
 

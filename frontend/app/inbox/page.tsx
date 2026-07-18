@@ -18,15 +18,14 @@ interface Artifact {
   email_body: string;
   confidence: number;
   cost_usd: number;
-  pain_points: string[];
-  reason_selected: string;
-  expected_reply_rate: string;
-  expected_meeting_prob: string;
   status: string;
   metadata?: {
     personalization_score?: number;
-    business_brain_match?: number;
-    spam_risk?: string;
+    explainability_summary?: string[];
+    citations?: Array<{ field: string; snippet: string; source_url: string }>;
+    prompt_version?: string;
+    model?: string;
+    temperature?: number;
     versions?: Array<{ version: number; subject: string; body: string; edited_by: string }>;
     alternatives?: Array<{ label: string; icon: string; email_subject: string; email_body: string }>;
   };
@@ -96,6 +95,7 @@ export default function InboxPage() {
   const [showAlts, setShowAlts] = useState(false);
   const [alts, setAlts] = useState<any[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchArtifacts = useCallback(async () => {
@@ -234,6 +234,8 @@ export default function InboxPage() {
     Friendly: <Smile className="w-3.5 h-3.5" />,
     "Very Short": <Zap className="w-3.5 h-3.5" />,
   };
+  const explainability = meta?.explainability_summary ?? [];
+  const citations = meta?.citations ?? [];
 
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] overflow-hidden">
@@ -348,58 +350,95 @@ export default function InboxPage() {
                 </div>
               </div>
 
-              {/* Confidence summary */}
-              <div className="px-6 py-3 border-b border-white/[0.06] flex-shrink-0 flex items-center gap-6 bg-white/[0.015]">
-                <ScoreRing value={personalization} label="Personalization" color="#00F0FF" />
-                <ScoreRing value={brainMatch} label="Brain Match" color="#a855f7" />
-                <ScoreRing value={selected.confidence ?? 90} label="AI Confidence" color="#10B981" />
-                <div className="ml-auto grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
-                  <div className="text-gray-500">Expected Reply</div>
-                  <div className="text-white font-semibold">{selected.expected_reply_rate || "—"}</div>
-                  <div className="text-gray-500">Meeting Prob.</div>
-                  <div className="text-white font-semibold">{selected.expected_meeting_prob || "—"}</div>
-                  <div className="text-gray-500">AI Cost</div>
-                  <div className="text-white font-semibold">${(selected.cost_usd ?? 0.04).toFixed(2)}</div>
+              {/* Validation & Evidence Coverage summary */}
+              <div className="px-6 py-3 border-b border-white/[0.06] flex-shrink-0 flex flex-col gap-3 bg-white/[0.015]">
+                <div className="flex items-center gap-4">
+                  <div className={`px-2.5 py-1 rounded-md text-xs font-bold border ${citations.length > 0 ? 'bg-[#10B981]/10 text-[#10B981] border-[#10B981]/20' : 'bg-amber-400/10 text-amber-400 border-amber-400/20'}`}>
+                    {citations.length > 0 ? "✓ All claims verified" : "⚠ No citations found"}
+                  </div>
+                  
+                  <div className="flex-1 flex items-center gap-2">
+                    <span className="text-xs text-gray-500 font-semibold">Evidence Coverage:</span>
+                    <div className="flex flex-wrap gap-1">
+                      {explainability.map((ex, i) => (
+                        <span key={i} className={`px-1.5 py-0.5 text-[10px] rounded border ${ex.startsWith('✓') ? 'bg-[#10B981]/10 text-[#10B981] border-[#10B981]/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
+                          {ex}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button onClick={() => setShowAdvanced(!showAdvanced)} className="text-[10px] text-gray-500 hover:text-white transition-colors">
+                    Advanced {showAdvanced ? "▲" : "▼"}
+                  </button>
                 </div>
-                {versions.length > 0 && (
-                  <div className="ml-4 flex items-center gap-1 flex-shrink-0">
-                    <History className="w-3.5 h-3.5 text-gray-500" />
-                    <span className="text-[10px] text-gray-500 mr-1">Versions:</span>
-                    {versions.map((v, idx) => (
-                      <button key={idx}
-                        onClick={() => { setSelectedVersion(idx); setEditedBody(v.body); setEditedSubject(v.subject); setIsDirty(false); }}
-                        className={`w-6 h-6 rounded text-[10px] font-bold transition-colors ${selectedVersion === idx ? "bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/40" : "text-gray-500 hover:text-white hover:bg-white/10"}`}>
-                        {v.version}
-                      </button>
-                    ))}
-                    <button
-                      onClick={() => { setSelectedVersion(null); setEditedBody(selected.email_body || ""); setEditedSubject(selected.email_subject || ""); setIsDirty(false); }}
-                      className={`px-2 h-6 rounded text-[10px] font-bold transition-colors ${selectedVersion === null ? "bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40" : "text-gray-500 hover:text-white hover:bg-white/10"}`}>
-                      Current
-                    </button>
+                
+                {showAdvanced && (
+                  <div className="flex items-center gap-6 p-2 rounded bg-black/40 border border-white/5 mt-1 text-xs">
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 text-[10px]">Model</span>
+                      <span className="text-white font-mono">{meta?.model || "gpt-4o"}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 text-[10px]">Prompt</span>
+                      <span className="text-white font-mono">{meta?.prompt_version || "v2.1"}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-gray-500 text-[10px]">Temperature</span>
+                      <span className="text-white font-mono">{meta?.temperature || 0.4}</span>
+                    </div>
+                    {versions.length > 0 && (
+                      <div className="ml-auto flex items-center gap-1 flex-shrink-0">
+                        <History className="w-3.5 h-3.5 text-gray-500" />
+                        <span className="text-[10px] text-gray-500 mr-1">Versions:</span>
+                        {versions.map((v, idx) => (
+                          <button key={idx}
+                            onClick={() => { setSelectedVersion(idx); setEditedBody(v.body); setEditedSubject(v.subject); setIsDirty(false); }}
+                            className={`w-6 h-6 rounded text-[10px] font-bold transition-colors ${selectedVersion === idx ? "bg-[#00F0FF]/20 text-[#00F0FF] border border-[#00F0FF]/40" : "text-gray-500 hover:text-white hover:bg-white/10"}`}>
+                            {v.version}
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => { setSelectedVersion(null); setEditedBody(selected.email_body || ""); setEditedSubject(selected.email_subject || ""); setIsDirty(false); }}
+                          className={`px-2 h-6 rounded text-[10px] font-bold transition-colors ${selectedVersion === null ? "bg-[#10B981]/20 text-[#10B981] border border-[#10B981]/40" : "text-gray-500 hover:text-white hover:bg-white/10"}`}>
+                          Current
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Pain points */}
-              {selected.pain_points?.length > 0 && (
-                <div className="px-6 py-2 border-b border-white/[0.06] flex-shrink-0 flex flex-wrap gap-2">
-                  {selected.pain_points.map((pp, i) => <span key={i} className="px-2 py-0.5 bg-red-500/10 text-red-400 text-xs rounded border border-red-500/20">{pp}</span>)}
-                  {selected.reason_selected && <span className="px-2 py-0.5 bg-purple-500/10 text-purple-400 text-xs rounded border border-purple-500/20 ml-auto max-w-xs truncate">{selected.reason_selected}</span>}
-                </div>
-              )}
-
               {/* Email body editor */}
-              <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4">
                 {showDiff && isDirty ? (
                   <DiffView original={originalBody} current={editedBody} />
                 ) : (
                   <textarea
                     value={editedBody}
                     onChange={(e) => handleBodyChange(e.target.value)}
-                    className="w-full h-full min-h-[200px] bg-transparent text-gray-200 text-sm font-mono leading-relaxed resize-none outline-none border-none"
+                    className="w-full min-h-[200px] bg-transparent text-gray-200 text-sm font-mono leading-relaxed resize-none outline-none border-none"
                     placeholder="Email body will appear here…"
                   />
+                )}
+                
+                {citations.length > 0 && (
+                  <div className="mt-4 border-t border-white/10 pt-4">
+                    <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
+                      <CheckCheck className="w-3.5 h-3.5" /> Verified Citations
+                    </h3>
+                    <div className="space-y-2">
+                      {citations.map((c, i) => (
+                        <div key={i} className="bg-white/5 border border-white/10 rounded-lg p-3">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className="text-xs font-bold text-[#00F0FF]">{c.field}</span>
+                            <a href={c.source_url} target="_blank" rel="noreferrer" className="text-[10px] text-gray-500 hover:text-white truncate max-w-[200px]">{c.source_url}</a>
+                          </div>
+                          <p className="text-xs text-gray-400 italic">"{c.snippet}"</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -462,8 +501,18 @@ export default function InboxPage() {
               {/* Action bar */}
               <div className="flex-shrink-0 border-t border-white/[0.06] px-6 py-4 flex items-center gap-3">
                 <button onClick={() => handleApprove(selected.id)}
-                  className="flex items-center gap-2 bg-white text-black font-bold px-5 py-2.5 rounded-lg hover:bg-gray-100 transition-colors">
-                  <Check className="w-4 h-4" /> Approve Draft
+                  className="flex items-center gap-2 bg-[#10B981] text-black font-bold px-5 py-2.5 rounded-lg hover:bg-[#10B981]/90 transition-colors">
+                  <Check className="w-4 h-4" /> Approve & Queue
+                </button>
+                {isDirty && (
+                  <button onClick={() => handleApprove(selected.id)}
+                    className="flex items-center gap-2 bg-white text-black font-bold px-5 py-2.5 rounded-lg hover:bg-gray-100 transition-colors">
+                    <Check className="w-4 h-4" /> Approve Edits
+                  </button>
+                )}
+                <button onClick={() => handleReject(selected.id)}
+                  className="flex items-center gap-2 bg-red-500/10 text-red-400 border border-red-500/20 font-bold px-4 py-2.5 rounded-lg hover:bg-red-500/20 transition-colors text-sm">
+                  <X className="w-4 h-4" /> Reject
                 </button>
                 {isDirty && (
                   <button onClick={() => setShowDiff(!showDiff)}

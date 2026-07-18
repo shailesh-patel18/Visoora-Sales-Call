@@ -162,12 +162,12 @@ def test_business_map_endpoint(mock_verify):
     )
     assert response.status_code == 200
     res_data = response.json()
-    assert "config" in res_data
-    assert "segments" in res_data
-    assert "personas" in res_data
-    assert "strengths" in res_data
-    assert "weaknesses" in res_data
+    assert "agent_config" in res_data
+    assert "icp_segments" in res_data["agent_config"]
+    assert "buyer_personas" in res_data["agent_config"]
+    assert "strengths" in res_data["agent_config"]
+    assert "weaknesses" in res_data["agent_config"]
     
     # Verify value propagation from setup_mock_data config
-    assert res_data["config"]["company_description"] == "Custom B2B Software Development & SaaS Advisory."
-    assert res_data["config"]["value_proposition"] == "We build scaleable custom software, cloud apps, and modern API integrations."
+    assert res_data["agent_config"]["company_description"] == "Custom B2B Software Development & SaaS Advisory."
+    assert res_data["agent_config"]["value_proposition"] == "We build scaleable custom software, cloud apps, and modern API integrations."

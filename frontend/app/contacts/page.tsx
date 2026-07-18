@@ -169,63 +169,30 @@ export default function ContactsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-      const text = event.target?.result as string;
-      const rows = text.split("\n").filter(row => row.trim() !== "");
-      // Assume CSV format: Name,Company,Phone,Email,Lead Score
-      // Skip header if it exists
-      const startIndex = rows[0].toLowerCase().includes("name") ? 1 : 0;
-      
-      let successCount = 0;
-      for (let i = startIndex; i < rows.length; i++) {
-        const row = rows[i];
-        // simple CSV parsing handling quotes (naive approach)
-        const cols = row.split(",").map(c => c.replace(/^"|"$/g, "").trim());
-        if (cols.length < 3) continue;
+    const formData = new FormData();
+    formData.append("file", file);
 
-        const [name, company, phone, email, scoreStr] = cols;
-        if (!name || !phone) continue;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts/upload`, {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: formData
+      });
 
-        // format phone naive
-        let phoneFormatted = phone;
-        if (!phoneFormatted.startsWith("+")) {
-          phoneFormatted = `+1${phoneFormatted.replace(/\D/g, "")}`;
-        }
-
-        const payload = {
-          phone_e164: phoneFormatted,
-          full_name: name,
-          company_name: company || "Independent",
-          email: email || undefined,
-          lead_score: parseInt(scoreStr) || 50,
-          lead_source: "inbound",
-          tags: ["csv_upload"],
-          custom_fields: {}
-        };
-
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/v1/crm/contacts`, {
-            method: "POST",
-            headers: {
-              ...getAuthHeaders(),
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify(payload)
-          });
-          if (res.ok) {
-            const savedContact = await res.json();
-            addContact(savedContact);
-            successCount++;
-          }
-        } catch (err) {
-          console.warn("Failed to upload contact row:", err);
-        }
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Successfully uploaded ${data.imported} contacts.`);
+        fetchContacts(); // Refresh list
+      } else {
+        const errData = await res.json();
+        alert(`Upload failed: ${errData.detail || "Check CSV format."}`);
       }
-      alert(`Successfully uploaded ${successCount} contacts.`);
-    };
-    reader.readAsText(file);
-    e.target.value = ""; // reset input
+    } catch (err) {
+      console.error("Failed to upload CSV:", err);
+      alert("Upload failed due to a network error.");
+    } finally {
+      e.target.value = ""; // reset input
+    }
   };
 
   const fetchContacts = async () => {

@@ -39,13 +39,7 @@ if FirecrawlApp and getattr(settings, 'firecrawl_api_key', None):
     except Exception as e:
         logger.error("firecrawl_init_failed", error=str(e))
 
-aclient = None
-_openai_key = getattr(settings, 'openai_api_key', None)
-if _openai_key:
-    try:
-        aclient = instructor.from_openai(AsyncOpenAI(api_key=_openai_key))
-    except Exception as e:
-        logger.error("instructor_init_failed", error=str(e))
+
 
 class AnalyzeRequest(BaseModel):
     website: str
@@ -85,12 +79,13 @@ class AnalyzeDomainResponse(BaseModel):
 
     class Config:
         json_schema_extra = {
-            "description": "Extract ONLY what is explicitly stated in the provided text. Never guess, infer, or hallucinate. If you cannot find strong evidence in the text, set the value to 'Unable to verify', confidence to 0, and snippet to 'N/A'."
+            "description": "Every AI-generated insight must be backed by evidence from the source website and include a confidence score. If you cannot find strong evidence in the text, set the value to 'Unable to verify', confidence to 0, and snippet to 'N/A'."
         }
 
 async def in_house_crawl(base_url: str) -> dict:
-    """An in-house crawler that checks the homepage and common subpages, returning combined markdown."""
+    """An in-house crawler that checks the homepage and common subpages, returning structured JSON."""
     from urllib.parse import urlparse
+    import json
     parsed = urlparse(base_url)
     if not parsed.scheme:
         base_url = "https://" + base_url
@@ -99,37 +94,70 @@ async def in_house_crawl(base_url: str) -> dict:
     base_url = base_url.rstrip("/")
     paths_to_check = ["/", "/about", "/about-us", "/pricing", "/services", "/product"]
     
-    scraped_text = ""
+    structured_data = {
+        "metadata": {"sourceURL": base_url},
+        "pages": []
+    }
+    
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         
-        async def fetch_path(path: str) -> str:
+        async def fetch_path(path: str) -> dict:
             try:
                 res = await client.get(f"{base_url}{path}", headers=headers)
                 if res.status_code == 200:
                     soup = BeautifulSoup(res.text, "html.parser")
-                    # Remove nav, header, footer for cleaner text
+                    
+                    # 1. Metadata
+                    title = soup.title.string if soup.title else ""
+                    meta_desc = ""
+                    desc_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+                    if desc_tag:
+                        meta_desc = desc_tag.get("content", "")
+                        
+                    # 2. Schema.org
+                    schemas = []
+                    for script in soup.find_all("script", type="application/ld+json"):
+                        try:
+                            schemas.append(json.loads(script.string))
+                        except:
+                            pass
+                            
+                    # 3. Headers
+                    h1s = [h.get_text(strip=True) for h in soup.find_all("h1")]
+                    h2s = [h.get_text(strip=True) for h in soup.find_all("h2")]
+                    
+                    # 4. Clean text fallback
                     for el in soup(["nav", "header", "footer", "script", "style", "noscript", "iframe", "svg"]):
                         el.decompose()
                     text = soup.get_text(separator="\n", strip=True)
-                    # Clean up multiple newlines
                     text = re.sub(r'\n{3,}', '\n\n', text)
-                    if len(text) > 50:
-                        return f"--- PAGE: {path.upper()} ---\n{text[:4000]}\n\n"
+                    
+                    if len(text) > 50 or title or meta_desc:
+                        return {
+                            "path": path,
+                            "title": title,
+                            "description": meta_desc,
+                            "schemas": schemas,
+                            "h1s": h1s,
+                            "h2s": h2s,
+                            "text_sample": text[:2000]
+                        }
             except Exception as e:
                 pass
-            return ""
+            return None
 
         results = await asyncio.gather(*(fetch_path(p) for p in paths_to_check))
         for r in results:
-            scraped_text += r
+            if r:
+                structured_data["pages"].append(r)
             
-    if not scraped_text.strip():
+    if not structured_data["pages"]:
         raise ValueError("not found")
         
-    return {"markdown": scraped_text[:15000], "metadata": {"sourceURL": base_url}}
+    return structured_data
 
 @router.post("/analyze-domain", response_model=AnalyzeDomainResponse)
 async def analyze_domain(payload: AnalyzeRequest, user: UserPrincipal = Depends(get_current_user)):
@@ -170,40 +198,23 @@ async def analyze_domain(payload: AnalyzeRequest, user: UserPrincipal = Depends(
                     raise HTTPException(status_code=400, detail={"error_type": "timeout", "message": "The website took too long to respond. It might be too large or slow."})
                 raise HTTPException(status_code=400, detail={"error_type": "unknown_scrape_error", "message": f"Failed to scrape website: {str(e)}"})
 
-    markdown_content = scrape_data.get('markdown', '')
+    pages = scrape_data.get('pages', [])
     metadata = scrape_data.get('metadata') or {}
     source_url = metadata.get('sourceURL') or metadata.get('source_url') or url
 
-    if not markdown_content or len(markdown_content.strip()) < 50:
-        logger.error("in_house_crawl_low_content", website=url, content_len=len(markdown_content) if markdown_content else 0)
+    if not pages:
+        logger.error("in_house_crawl_low_content", website=url, pages_len=len(pages))
         raise HTTPException(status_code=400, detail={"error_type": "low_content", "message": "We read the site but couldn't find enough information to build a profile. Please use the manual fallback to add a quick description instead."})
 
-    # 2. Extract structured evidence using LLM
-    logger.info("llm_extraction_started", markdown_length=len(markdown_content))
+    # 2. Extract structured evidence via AI Gateway
+    logger.info("ai_gateway_extraction_started", pages=len(pages))
     try:
-        extraction = await aclient.chat.completions.create(
-            model="gpt-4o-mini",
-            response_model=AnalyzeDomainResponse,
-            messages=[
-                {
-                    "role": "system", 
-                    "content": (
-                        "You are a strictly objective data extractor. Your ONLY job is to extract business details from the provided website text.\n\n"
-                        "CORE PRINCIPLE: ZERO HALLUCINATION.\n"
-                        "1. You must NEVER guess, infer, or hallucinate.\n"
-                        "2. Every extracted field MUST be backed by a direct quote (`snippet`) from the text.\n"
-                        "3. If the information is missing from the text, you MUST set the value to 'Unable to verify', `confidence` to 0, and `snippet` to 'N/A'.\n"
-                        "4. Confidence should be 95-100 for explicitly stated facts, 60-94 for weakly stated facts, and 0 for missing facts.\n"
-                        f"5. Set `source_url` to {source_url} for all valid snippets."
-                    )
-                },
-                {"role": "user", "content": f"Website Content:\n\n{markdown_content[:20000]}"}
-            ]
-        )
+        from server.ai_gateway import gateway
+        extraction = await gateway.extract_business_brain(url=url, structured_data=scrape_data, source_url=source_url)
         return extraction
     except Exception as e:
-        logger.error("llm_extraction_failed", error=str(e), tenant_id=user.tenant_id, url=url)
-        raise HTTPException(status_code=500, detail={"error_type": "llm_failure", "message": "Failed to extract intelligence from website via LLM."})
+        logger.error("ai_gateway_extraction_failed", error=str(e), tenant_id=user.tenant_id, url=url)
+        raise HTTPException(status_code=500, detail={"error_type": "llm_failure", "message": "Failed to extract intelligence from website via AI Gateway."})
 
 @router.post("/complete")
 async def complete_onboarding(payload: dict, user: UserPrincipal = Depends(get_current_user)):

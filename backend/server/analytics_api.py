@@ -99,26 +99,51 @@ from v2.mission.repository import mission_repository
 @analytics_router.get("/dashboard/revenue")
 async def get_revenue_dashboard_metrics(user: UserPrincipal = Depends(get_current_user)):
     """
-    Returns actual CRM metrics (Leads, Pipeline, Pending Drafts).
+    Returns live tracking and CRM metrics by aggregating the mission_artifacts table.
     """
     tenant_id = user.tenant_id
     
-    # 1. Active Missions
+    # 1. Fetch live artifact data
+    res = get_scoped_supabase_client(user.raw_token).table("mission_artifacts")\
+        .select("*").eq("tenant_id", getattr(user, "tenant_uuid", tenant_id)).execute()
+    artifacts = res.data or []
+    
+    drafts_pending_count = 0
+    emails_sent = 0
+    emails_opened = 0
+    emails_clicked = 0
+    human_edits = 0
+    
+    pipeline_value = 0
+    default_acv = 5000 # Assume each prospect is worth $5k with 2% expected win rate
+    
+    for art in artifacts:
+        status = art.get("status")
+        metadata = art.get("metadata") or {}
+        tracking = metadata.get("tracking") or {}
+        
+        if status == "WAITING_APPROVAL":
+            drafts_pending_count += 1
+            pipeline_value += (default_acv * 0.02)
+        elif status in ["SENT", "QUEUED"]:
+            emails_sent += 1
+            pipeline_value += (default_acv * 0.02)
+            
+            if tracking.get("opens", 0) > 0:
+                emails_opened += 1
+            if tracking.get("clicks", 0) > 0:
+                emails_clicked += 1
+            if metadata.get("human_edited"):
+                human_edits += 1
+
+    human_edit_rate = round((human_edits / emails_sent) * 100) if emails_sent > 0 else 0
+    leads_count = len(artifacts)
+    
+    # 2. Active Missions (Keep using mission_repository for overarching goals)
     active_missions = await mission_repository.get_active_by_tenant(tenant_id)
     active_missions_count = len(active_missions)
     
-    # 2. Leads Researched (CRM)
-    leads = await lead_repository.get_by_tenant(tenant_id)
-    leads_count = len(leads)
-    
-    # 3. Pipeline Value (Avg Deal Size = $5000)
-    avg_deal_size = 5000
-    pipeline_value = leads_count * avg_deal_size
-    
-    # 4. Drafts Pending Approval
-    from v2.domain.crm.models import DraftStatus
-    pending_drafts = await draft_repository.get_by_status(tenant_id, DraftStatus.PENDING_APPROVAL)
-    # 5. AI Executive Briefing Summaries
+    # 3. AI Executive Briefing Summaries
     ai_briefing = [
         {
             "id": "sdr",
@@ -126,7 +151,7 @@ async def get_revenue_dashboard_metrics(user: UserPrincipal = Depends(get_curren
             "role": "Chief AI SDR",
             "avatar": "https://api.dicebear.com/7.x/notionists/svg?seed=Sarah",
             "status": "Active",
-            "summary": f"I drafted {len(pending_drafts)} personalized emails for your review in the Inbox."
+            "summary": f"I drafted {drafts_pending_count} personalized emails for your review in the Inbox."
         },
         {
             "id": "research",
@@ -149,8 +174,12 @@ async def get_revenue_dashboard_metrics(user: UserPrincipal = Depends(get_curren
     return {
         "active_missions_count": active_missions_count,
         "leads_researched_count": leads_count,
-        "pipeline_value": pipeline_value,
-        "drafts_pending_count": len(pending_drafts),
+        "pipeline_value": int(pipeline_value),
+        "drafts_pending_count": drafts_pending_count,
+        "emails_sent": emails_sent,
+        "emails_opened": emails_opened,
+        "emails_clicked": emails_clicked,
+        "human_edit_rate": human_edit_rate,
         "ai_briefing": ai_briefing
     }
 
@@ -1136,6 +1165,28 @@ async def approve_artifact(artifact_id: str, user: UserPrincipal = Depends(get_c
         # AUDIT LOG
         logger.info("audit_event", action="Approved Email", user_email=user.email, user_id=user.user_id, artifact_id=artifact_id, tenant_id=tenant_uuid, mission_id=artifact.get("mission_id"))
         
+        # Check for Human Edits
+        metadata = artifact.get("metadata", {})
+        versions = metadata.get("versions", [])
+        if versions:
+            original_ai_version = versions[0]
+            current_body = artifact.get("email_body", "")
+            current_subject = artifact.get("email_subject", "")
+            
+            logger.info(
+                "human_feedback_captured",
+                artifact_id=artifact_id,
+                tenant_id=tenant_uuid,
+                original_subject=original_ai_version.get("subject", ""),
+                original_body=original_ai_version.get("body", ""),
+                edited_subject=current_subject,
+                edited_body=current_body,
+                note="Human edit delta captured for analytics."
+            )
+            # Tag metadata to indicate this was human edited
+            metadata["human_edited"] = True
+            get_scoped_supabase_client(user.raw_token).table("mission_artifacts").update({"metadata": metadata}).eq("id", artifact_id).execute()
+
         # Enqueue the actual dispatch job
         await enqueue_background_job(
             tenant_id=tenant_uuid,
@@ -1392,8 +1443,12 @@ async def generate_alternatives(artifact_id: str, user: UserPrincipal = Depends(
         }
 
         from ai_platform.services.generation_service import generation_service
+        
+        # Get citations from metadata so alternatives are grounded in the exact same evidence
+        citations = artifact.get("metadata", {}).get("citations", [])
+        
         alternatives = await generation_service.generate_email_alternatives(
-            business_brain, target, "Recent company expansion phase."
+            target, citations
         )
 
         # Save alternatives to metadata

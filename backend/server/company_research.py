@@ -11,6 +11,8 @@ from server.storage_manager import supabase_admin_client as supabase_client
 from server.worker import register_job_handler
 from crm.auto_advance import _load_local_json, _save_local_json
 from ai_platform.agents.research_agent import ResearchAgent
+from server.ai_gateway import gateway
+from server.onboarding_api import in_house_crawl
 
 logger = structlog.get_logger("visoora_company_research")
 
@@ -109,13 +111,28 @@ async def company_research_job_handler(payload: dict, job_id: str = None) -> dic
             max_attempts = 3
             for attempt in range(max_attempts):
                 try:
-                    raw_research = await run_company_research(target.get("id"), tenant_uuid, contact_data=target)
-                    facts = raw_research.get("sourced_facts", [])
-                    research_data = "\n".join([f"- {f.get('fact', '')} (Source: {f.get('source', '')})" for f in facts])
-                    if not research_data.strip():
-                        research_data = "No verified facts found."
+                    knowledge = await run_company_research(target.get("id"), tenant_uuid, contact_data=target)
                     
-                    email_result = await generation_service.draft_prospecting_email(business_brain, target, research_data)
+                    email_result = await generation_service.draft_prospecting_email(business_brain, target, knowledge)
+                    
+                    draft = email_result.get("draft", {})
+                    meta = email_result.get("meta", {})
+                    
+                    # Deterministic Scoring (Coverage based)
+                    citations = draft.get("citations", [])
+                    used_fields = set(c.get("field", "").lower() for c in citations)
+                    score = 10 # Base score for running validation
+                    if any("company" in f or "industry" in f for f in used_fields): score += 30
+                    if any("product" in f or "pricing" in f for f in used_fields): score += 30
+                    if any("case study" in f or "customer" in f for f in used_fields): score += 30
+                    personalization_score = min(100, score)
+                    
+                    # Explainability Summary
+                    explainability = []
+                    for c in citations:
+                        explainability.append(f"✓ Used {c.get('field')}")
+                    if not explainability:
+                        explainability.append("⚠ No verified facts used.")
                     
                     # 4. Save Artifact
                     artifact_record = {
@@ -124,20 +141,20 @@ async def company_research_job_handler(payload: dict, job_id: str = None) -> dic
                         "status": "WAITING_APPROVAL",
                         "created_by": "Visoora Engine",
                         "mission_id": mission_name,
-                        "confidence": email_result.get("personalization_score", 92),
+                        "confidence": personalization_score,
                         "cost_usd": 0.04,
                         "prospect_name": f"{target.get('first_name', 'John')} {target.get('last_name', '')}".strip(),
                         "company_name": target.get('company', 'Unknown Company'),
-                        "pain_points": email_result.get("pain_points_addressed", []),
-                        "reason_selected": email_result.get("reason_selected", ""),
-                        "email_subject": email_result.get("email_subject", ""),
-                        "email_body": email_result.get("email_body", ""),
-                        "expected_reply_rate": email_result.get("expected_reply_rate", "10%"),
-                        "expected_meeting_prob": email_result.get("expected_meeting_prob", "2%"),
+                        "email_subject": draft.get("subject", ""),
+                        "email_body": draft.get("body", ""),
+                        # Removed fake metrics (expected_reply_rate, expected_meeting_prob)
                         "metadata": {
-                            "personalization_score": email_result.get("personalization_score", 92),
-                            "business_brain_match": email_result.get("business_brain_match", 90),
-                            "spam_risk": email_result.get("spam_risk", "Low"),
+                            "personalization_score": personalization_score,
+                            "explainability_summary": explainability,
+                            "citations": citations,
+                            "prompt_version": meta.get("prompt_version"),
+                            "model": meta.get("model"),
+                            "temperature": meta.get("temperature"),
                             "versions": [],
                             "alternatives": []
                         }
@@ -202,10 +219,33 @@ async def check_robots_txt_allows(url: str, user_agent: str = "*") -> bool:
         return True
     return True
 
+def _validate_evidence(fields: list, structured_text: str) -> list:
+    """
+    Evidence Validator Rule:
+    1. Confidence < 80 -> Discard
+    2. Snippet doesn't exist in text -> Discard
+    3. Confidence >= 95 -> Auto-verify
+    """
+    valid_fields = []
+    text_lower = structured_text.lower()
+    
+    for f in fields:
+        if f.confidence < 80 or str(f.value).strip().lower() == "unknown":
+            continue
+            
+        # Check snippet existence
+        if f.snippet != "N/A" and f.snippet.lower() not in text_lower:
+            continue
+            
+        f.verified = f.confidence >= 95
+        valid_fields.append(f.model_dump())
+        
+    return valid_fields
+
 async def run_company_research(contact_id: str, tenant_id: str, contact_data: dict = None) -> dict:
     """
-    Performs safe company research respecting robots.txt.
-    Structures data separating Sourced Facts from AI Estimates.
+    Performs safe company research using the Deterministic Knowledge Engine.
+    Structures data exclusively as verified EvidenceFields.
     """
     # 1. Fetch contact
     contact = contact_data
@@ -238,77 +278,51 @@ async def run_company_research(contact_id: str, tenant_id: str, contact_data: di
     if website and not website.startswith("http"):
         website = f"https://{website}"
 
-    # Determine if we can scrape target site
+    # 2. Deterministic Crawl (No Raw HTML to AI)
     can_scrape = False
     metadata_facts = []
-    scraped_text = ""
+    structured_data = {}
     
     if website and "gmail.com" not in website and "yahoo.com" not in website and "hotmail.com" not in website:
         can_scrape = await check_robots_txt_allows(website)
         if can_scrape:
             try:
-                async with httpx.AsyncClient(timeout=4.0) as client:
-                    res = await client.get(website)
-                    if res.status_code == 200:
-                        # Extract title and simple body text snippets safely (avoiding rich HTML parsing libraries to keep code simple)
-                        scraped_text = res.text[:2000] # Grab first 2000 chars of HTML/text
-                        metadata_facts.append(f"Successfully scraped home page of {website}")
+                structured_data = await in_house_crawl(website)
+                metadata_facts.append(f"Successfully scraped {website}")
             except Exception as scrape_err:
                 logger.warn("scrape_home_page_failed", url=website, error=str(scrape_err))
-                metadata_facts.append(f"Attempted scraping {website} but request timed out.")
+                metadata_facts.append(f"Attempted scraping {website} but request failed.")
         else:
             metadata_facts.append(f"Scraping website {website} disallowed by robots.txt compliance rule.")
     else:
         metadata_facts.append("No valid custom company domain website listed.")
 
-    # Call LLM to extract sourced facts vs projections
-    facts_list = [
-        {"fact": f"Company Name: {company_name}", "source": "CRM record", "url": website or "N/A"},
-        {"fact": f"Contact email domain: {website}", "source": "CRM record", "url": website or "N/A"}
-    ]
-    estimates_list = [
-        {"estimate": "Revenue tier likely matches small/medium enterprise based on CRM baseline.", "confidence": "Medium"}
-    ]
-
-    prompt = f"""
-    You are an expert market researcher. Help structure research on the company "{company_name}".
-    We scraped this text snippet from their domain:
-    {scraped_text[:1200]}
-
-    Return a structured report separating VERIFIED FACTS from ESTIMATED PROJECTIONS.
-    - FACTS MUST be directly grounded in the scraped snippet or domain name (e.g. description, headquarters, website). Provide the URL source.
-    - ESTIMATED PROJECTIONS are logical market-size guesses, target buyer personas, or potential sales objections they might raise.
-    - Do not make up fake client names or specific numbers (like $23.4M revenue) unless it is explicitly present in the scraped text snippet.
-
-    Respond ONLY in this valid JSON format:
-    {{
-        "sourced_facts": [
-            {{"fact": "Fact details", "source": "Website meta text", "url": "{website or "N/A"}"}}
-        ],
-        "estimates": [
-            {{"estimate": "Estimated details", "confidence": "High/Medium/Low"}}
-        ]
-    }}
-    """
-    try:
-        agent = ResearchAgent(tenant_id=contact.get("tenant_id", "system"), user_id=contact_id)
-        research_res = await agent.research_company(prompt=prompt)
-        
-        # Extract from the Pydantic model returned
-        facts_list = [f.model_dump() for f in research_res.sourced_facts] if research_res.sourced_facts else facts_list
-        estimates_list = [e.model_dump() for e in research_res.estimates] if research_res.estimates else estimates_list
-        
-    except Exception as llm_err:
-        logger.error("research_llm_failed", error=str(llm_err))
-        estimates_list.append({"estimate": "AI evaluation bypassed due to temporary API timeout.", "confidence": "Low"})
-
-    research_data = {
-        "sourced_facts": facts_list,
-        "estimates": estimates_list,
+    # Convert structured data to a searchable string for validation
+    structured_text_blob = json.dumps(structured_data)
+    
+    knowledge = {
+        "identity": [],
+        "products": [],
+        "social_proof": [],
         "metadata_facts": metadata_facts
     }
 
-    # Save to database or local fallback
+    if structured_data and structured_data.get("pages"):
+        try:
+            # 3. Small Focused Extractors
+            identity_ext = await gateway.extract_identity(structured_data, website)
+            products_ext = await gateway.extract_products(structured_data, website)
+            proof_ext = await gateway.extract_social_proof(structured_data, website)
+            
+            # 4. Evidence Validation
+            knowledge["identity"] = _validate_evidence(identity_ext.fields, structured_text_blob)
+            knowledge["products"] = _validate_evidence(products_ext.fields, structured_text_blob)
+            knowledge["social_proof"] = _validate_evidence(proof_ext.fields, structured_text_blob)
+            
+        except Exception as llm_err:
+            logger.error("research_extraction_failed", error=str(llm_err))
+
+    # 5. Save Knowledge Object
     if supabase_client:
         try:
             try:
@@ -316,7 +330,7 @@ async def run_company_research(contact_id: str, tenant_id: str, contact_data: di
                     .update({
                         "custom_fields": {
                             **contact.get("custom_fields", {}),
-                            "research_data": research_data
+                            "research_data": knowledge
                         }
                     })\
                     .eq("id", contact_id)\
@@ -326,7 +340,7 @@ async def run_company_research(contact_id: str, tenant_id: str, contact_data: di
                     .update({
                         "custom_fields": {
                             **contact.get("custom_fields", {}),
-                            "research_data": research_data
+                            "research_data": knowledge
                         }
                     })\
                     .eq("id", contact_id)\
@@ -339,9 +353,9 @@ async def run_company_research(contact_id: str, tenant_id: str, contact_data: di
     for c in local_contacts:
         if c.get("id") == contact_id:
             c["custom_fields"] = c.get("custom_fields") or {}
-            c["custom_fields"]["research_data"] = research_data
+            c["custom_fields"]["research_data"] = knowledge
             break
     _save_local_json("local_crm_contacts.json", local_contacts)
 
     logger.info("company_research_completed", contact_id=contact_id, company=company_name)
-    return research_data
+    return knowledge

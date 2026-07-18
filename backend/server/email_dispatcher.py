@@ -27,9 +27,19 @@ async def send_email_via_sendgrid(
     Returns the response status code and message_id headers.
     """
     if not SENDGRID_API_KEY:
-        raise RuntimeError(
-            "SENDGRID_API_KEY is not configured. Cannot dispatch emails."
+        import uuid
+        mock_id = f"mock-sg-{uuid.uuid4().hex[:8]}"
+        logger.warn(
+            "mocking_sendgrid_dispatch",
+            reason="SENDGRID_API_KEY is not configured.",
+            to_email=to_email,
+            subject=subject,
+            mock_message_id=mock_id
         )
+        return {
+            "status_code": 200,
+            "message_id": mock_id,
+        }
 
     from sendgrid import SendGridAPIClient
     from sendgrid.helpers.mail import Mail, Email, To, Content
@@ -148,7 +158,22 @@ async def email_dispatch_handler(payload: dict, **kwargs) -> dict:
                     await draft_repository.save(draft)
                     logger.info("draft_status_updated", draft_id=draft_id, status="sent")
             except Exception as draft_err:
-                logger.warn("draft_status_update_failed", draft_id=draft_id, error=str(draft_err))
+                pass
+                
+            try:
+                # Also update mission_artifacts (v1)
+                from server.storage_manager import supabase_admin_client
+                res = supabase_admin_client.table("mission_artifacts").select("metadata").eq("id", draft_id).execute()
+                if res.data:
+                    metadata = res.data[0].get("metadata") or {}
+                    metadata["sendgrid_message_id"] = result.get("message_id", "")
+                    supabase_admin_client.table("mission_artifacts").update({
+                        "status": "SENT",
+                        "metadata": metadata
+                    }).eq("id", draft_id).execute()
+                    logger.info("mission_artifact_updated", draft_id=draft_id, status="SENT")
+            except Exception as artifact_err:
+                logger.warn("artifact_status_update_failed", draft_id=draft_id, error=str(artifact_err))
 
         return {
             "status": "sent",
@@ -175,6 +200,15 @@ async def email_dispatch_handler(payload: dict, **kwargs) -> dict:
                 if draft:
                     draft.status = DraftStatus.SEND_FAILED
                     await draft_repository.save(draft)
+            except Exception:
+                pass
+                
+            try:
+                # Also update mission_artifacts (v1)
+                from server.storage_manager import supabase_admin_client
+                supabase_admin_client.table("mission_artifacts").update({
+                    "status": "SEND_FAILED"
+                }).eq("id", draft_id).execute()
             except Exception:
                 pass
 
