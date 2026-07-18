@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 import instructor
 from openai import AsyncOpenAI
-import google.generativeai as genai
 
 logger = structlog.get_logger("ai_gateway")
 
