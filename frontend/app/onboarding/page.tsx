@@ -7,6 +7,7 @@ import { Globe, ArrowRight, ShieldCheck, CheckCircle2, Play, Activity } from "lu
 import { startDomainAnalysis, completeOnboarding } from "./api";
 import { useAuthStore } from "../auth/store";
 import { BACKEND_URL } from "../config";
+import { MissionControl, MissionStep } from "../components/MissionControl";
 
 type OnboardingStep = "input_url" | "analyzing" | "confirming_brain" | "done";
 
@@ -35,14 +36,13 @@ export default function V3OnboardingPage() {
   ];
 
   const { user } = useAuthStore();
-  const timelineRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll timeline
-  useEffect(() => {
-    if (timelineRef.current) {
-      timelineRef.current.scrollTop = timelineRef.current.scrollHeight;
-    }
-  }, [timelineIndex]);
+  const missionSteps: MissionStep[] = timelineSteps.map((label, idx) => {
+    let status: "pending" | "active" | "done" = "pending";
+    if (idx < timelineIndex) status = "done";
+    else if (idx === timelineIndex) status = "active";
+    return { id: `step-${idx}`, label, status };
+  });
 
   // Fake fast staggered events
   useEffect(() => {
@@ -171,31 +171,7 @@ export default function V3OnboardingPage() {
             animate={{ opacity: 1 }}
             className="w-full max-w-lg space-y-8"
           >
-             <h2 className="text-2xl font-bold text-white text-center flex items-center justify-center gap-3">
-                 <Activity className="w-6 h-6 text-[#00F0FF] animate-pulse" /> AI Mission Control
-             </h2>
-             <div 
-                ref={timelineRef}
-                className="bg-[#111] border border-white/10 rounded-2xl p-6 h-[400px] overflow-y-auto space-y-4 custom-scrollbar relative shadow-[0_0_40px_rgba(0,240,255,0.05)]"
-             >
-                {timelineSteps.map((tStep, idx) => (
-                    <motion.div
-                        key={idx}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: idx <= timelineIndex ? 1 : 0, x: idx <= timelineIndex ? 0 : -10 }}
-                        className={`flex items-center gap-4 ${idx === timelineIndex ? 'text-white' : 'text-gray-500'}`}
-                    >
-                        {idx < timelineIndex ? (
-                            <CheckCircle2 className="w-5 h-5 text-[#10B981] shrink-0" />
-                        ) : idx === timelineIndex ? (
-                            <div className="w-5 h-5 border-2 border-[#00F0FF] border-t-transparent rounded-full animate-spin shrink-0"/>
-                        ) : (
-                            <div className="w-5 h-5 shrink-0"/>
-                        )}
-                        <span className="font-medium font-mono text-sm tracking-wide">{tStep}</span>
-                    </motion.div>
-                ))}
-             </div>
+            <MissionControl steps={missionSteps} />
           </motion.div>
         )}
 

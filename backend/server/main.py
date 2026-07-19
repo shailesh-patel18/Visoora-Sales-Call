@@ -80,9 +80,9 @@ async def exception_tracing_middleware(request: Request, call_next):
         
         # Don't log health/metrics checks to avoid spam
         if request.url.path not in ["/health", "/ready", "/metrics"]:
-            log_structured(
-                "INFO", "http_request", 
-                f"{request.method} {request.url.path} {response.status_code}", 
+            logger.info(
+                "http_request",
+                message=f"{request.method} {request.url.path} {response.status_code}", 
                 correlation_id=correlation_id,
                 tenant_id=tenant_id,
                 method=request.method,
@@ -99,7 +99,7 @@ async def exception_tracing_middleware(request: Request, call_next):
             "path": request.url.path,
             "method": request.method
         }
-        log_structured("CRITICAL", "http_request_failed", f"Unhandled HTTP exception: {exc}", correlation_id=correlation_id, **log_payload)
+        logger.critical("http_request_failed", message=f"Unhandled HTTP exception: {exc}", correlation_id=correlation_id, **log_payload)
         return JSONResponse(
             status_code=500,
             content={"detail": "Internal Server Error", "correlation_id": correlation_id}
@@ -109,7 +109,9 @@ async def exception_tracing_middleware(request: Request, call_next):
 # ROUTER REGISTRATION
 # ----------------------------------------------------
 from server.health import router as health_router
+from server.dev_tools import router as dev_tools_router
 app.include_router(health_router)
+app.include_router(dev_tools_router, prefix="/api")
 
 from server.analytics_api import analytics_router
 from server.public_api import public_router
@@ -126,7 +128,7 @@ try:
     from server.twilio_handler import router as twilio_router
     app.include_router(twilio_router)
 except ImportError as e:
-    log_structured("ERROR", "twilio_router_import_failed", str(e))
+    logger.error("twilio_router_import_failed", message=str(e))
 
 try:
     from crm.router import router as crm_router

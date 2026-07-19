@@ -57,6 +57,11 @@ class SecuritySettings(BaseModel):
     system_api_keys: Set[str] = Field(default_factory=lambda: {
         k.strip() for k in os.getenv("SYSTEM_API_KEYS", "").split(",") if k.strip()
     })
+    
+    # Developer Mode Flags
+    dev_mode: bool = Field(default_factory=lambda: os.getenv("DEV_MODE", "false").lower() == "true")
+    mock_ai: bool = Field(default_factory=lambda: os.getenv("MOCK_AI", "false").lower() == "true")
+    mock_research: bool = Field(default_factory=lambda: os.getenv("MOCK_RESEARCH", "false").lower() == "true")
 
     def is_production(self) -> bool:
         return self.app_env in {"production", "prod"}

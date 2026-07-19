@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    
+    # Developer Mode Flags
+    dev_mode: bool = False
+    mock_ai: bool = False
+    mock_research: bool = False
 
     class Config:
         env_file = ".env"

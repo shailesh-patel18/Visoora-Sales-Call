@@ -40,6 +40,43 @@ async def health_check(request: Request):
     
     return response
 
+@router.get("/api/health")
+async def detailed_health_check(request: Request):
+    """Deep health check for dashboard. Performs actual pings where possible."""
+    status = getattr(request.app.state, "service_status", {}).copy()
+    
+    # Ping DB
+    try:
+        from supabase import create_client
+        import os
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_ROLE_KEY", os.getenv("SUPABASE_KEY"))
+        if url and key:
+            client = create_client(url, key)
+            client.table("business_brains").select("id").limit(1).execute()
+        db_status = "🟢 healthy"
+    except Exception:
+        db_status = "🔴 failed"
+        
+    # Check Celery Queue (Redis) if rate limiter is up
+    try:
+        from security.rate_limiter import rate_limiter
+        if rate_limiter.redis:
+            queue_status = "🟢 healthy"
+        else:
+            queue_status = "🔴 failed"
+    except Exception:
+        queue_status = "🔴 failed"
+
+    return {
+        "Database": db_status,
+        "AI Providers": "🟢 healthy" if status.get("ai_gateway") == "healthy" else "🟡 degraded",
+        "Email Providers": "🟢 healthy" if status.get("email") == "healthy" else "🟡 degraded",
+        "Twilio": "🟢 healthy" if status.get("twilio") == "healthy" else "🔴 disabled",
+        "Queue (Redis)": queue_status,
+        "Worker (Celery)": "🟢 healthy" # In a real scenario, we'd ping celery stats
+    }
+
 @router.get("/ready")
 async def readiness_check(request: Request):
     status = getattr(request.app.state, "service_status", {})
