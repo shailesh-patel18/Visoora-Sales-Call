@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from ..schemas import PromptSchema, Capability
 
 class PromptRegistry:

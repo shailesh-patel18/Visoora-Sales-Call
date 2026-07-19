@@ -195,6 +195,7 @@ def _create_artifact_and_update_task(tenant_id, task_id, artifact_type, content_
         "tenant_id": tenant_id,
         "mission_id": mission_id,
         "type": artifact_type,
+        "artifact_type": artifact_type,
         "status": "WAITING_APPROVAL",
         "content": content_dict,
         "metadata": metadata,
@@ -212,22 +213,61 @@ def _create_artifact_and_update_task(tenant_id, task_id, artifact_type, content_
     return artifact_id
 
 async def prospecting_agent_handler(payload: dict, job_id: str) -> dict:
+    from ai_platform.memory.mission import MissionMemory
+    from ai_platform.orchestration.planner import MissionPlanner
+    import uuid
+    
     update_job_step(job_id, "prospecting", "running")
     task_id = payload.get("task_id")
     tenant_id = tenant_id_var.get()
     
-    leads = [
-        {"name": "Sarah Connor", "company": "Cyberdyne", "title": "Director of IT"},
-        {"name": "Tony Stark", "company": "Stark Ind", "title": "CEO"}
-    ]
+    # Fetch ICP segment to search for
+    icp_segment = payload.get("icp_segment")
+    if not icp_segment:
+        # Fallback to the first verified ICP segment in the database
+        res = supabase_client.table("icp_segments").select("*").eq("tenant_id", tenant_id).order("confidence", desc=True).limit(1).execute()
+        if res.data:
+            icp_segment = res.data[0]["segment"]
+        else:
+            update_job_step(job_id, "prospecting", "failed")
+            return {"status": "failed", "error": "No matching prospects found for this ICP yet. (No ICP segment provided or found)"}
+
+    # Initialize Mission Request
+    mission_id = str(uuid.uuid4())
+    company_name = payload.get("company_name", "Visoora Target")
     
+    from ai_platform.runtime.models import MissionRequest
+    from ai_platform.runtime.engine import runtime
+    
+    req = MissionRequest(
+        mission_id=mission_id,
+        type="LeadDiscovery",
+        tenant_id=tenant_id,
+        parameters={
+            "company_name": company_name,
+            "icp_segment": icp_segment
+        }
+    )
+    
+    # Execute Mission
+    try:
+        final_state = await runtime.execute(req)
+        leads = final_state.get("decision_makers", [])
+        if not leads:
+            update_job_step(job_id, "prospecting", "failed")
+            return {"status": "failed", "error": "No matching prospects found for this ICP across all capabilities."}
+    except Exception as e:
+        logger.error(f"Mission execution failed: {e}")
+        update_job_step(job_id, "prospecting", "failed")
+        return {"status": "failed", "error": f"Mission planning execution failed: {e}"}
+
     # Create artifact
     _create_artifact_and_update_task(
         tenant_id=tenant_id,
         task_id=task_id,
         artifact_type="prospect_list",
         content_dict={"leads": leads},
-        metadata={"sources": ["Apollo", "LinkedIn"], "count": len(leads)}
+        metadata={"sources": ["Mission Graph"], "count": len(leads), "icp_segment": icp_segment}
     )
     update_job_step(job_id, "prospecting", "success")
     return {"leads": leads, "count": len(leads), "status": "waiting_approval"}
@@ -255,9 +295,18 @@ async def email_agent_handler(payload: dict, job_id: str) -> dict:
     task_id = payload.get("task_id")
     tenant_id = tenant_id_var.get()
     
+    # Fetch Calendly URL from agent_configs
+    calendly_url = "Not configured"
+    try:
+        res = supabase_client.table("agent_configs").select("calendly_url").eq("tenant_id", tenant_id).execute()
+        if res.data and res.data[0].get("calendly_url"):
+            calendly_url = res.data[0]["calendly_url"]
+    except Exception as e:
+        logger.warning("calendly_fetch_failed", error=str(e))
+        
     agent = EmailAgent(tenant_id=tenant_id, user_id="system")
     goal = payload.get("goal", "Introduce our services")
-    context_str = f"Draft an email for a prospect aiming to {goal}. Keep it concise and personalized."
+    context_str = f"Draft an email for a prospect aiming to {goal}. Keep it concise and personalized. Call to Action: Book a meeting using this link: {calendly_url}"
     
     draft = await agent.draft_email(context_str)
     
@@ -277,6 +326,15 @@ async def voice_agent_handler(payload: dict, job_id: str) -> dict:
     task_id = payload.get("task_id")
     tenant_id = tenant_id_var.get()
     
+    # Fetch Calendly URL from agent_configs
+    calendly_url = "Not configured"
+    try:
+        res = supabase_client.table("agent_configs").select("calendly_url").eq("tenant_id", tenant_id).execute()
+        if res.data and res.data[0].get("calendly_url"):
+            calendly_url = res.data[0]["calendly_url"]
+    except Exception as e:
+        logger.warning("calendly_fetch_failed", error=str(e))
+    
     conversation_plan = {
         "objectives": ["Identify pain points", "Book demo"],
         "opening": f"Hi {payload.get('name', 'there')}, this is Alex from Visoora. I saw your recent launch...",
@@ -284,7 +342,7 @@ async def voice_agent_handler(payload: dict, job_id: str) -> dict:
         "pain_hypotheses": ["High drop-off rate on forms"],
         "objection_library": payload.get("objections", []),
         "qualification_rules": ["Budget > $1k/mo"],
-        "meeting_goal": "Schedule 15 min discovery call"
+        "meeting_goal": f"Schedule 15 min discovery call using this link: {calendly_url}"
     }
     
     _create_artifact_and_update_task(

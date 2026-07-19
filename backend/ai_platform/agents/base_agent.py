@@ -19,11 +19,16 @@ class BaseAgent:
     def __init__(self, tenant_id: str, user_id: Optional[str] = None):
         self.tenant_id = tenant_id
         self.user_id = user_id
-        
-        # Instantiate the provider manager. 
-        # In a real app this would likely be a singleton or injected via FastAPI dependencies.
-        gemini = GeminiProvider()
-        self.provider_manager = ProviderManager(primary_provider=gemini)
+        import os
+        is_dev = os.getenv("DEVELOPMENT_MODE", "false").lower() == "true"
+        if is_dev:
+            from ..providers.mock import MockLLMProvider
+            primary = MockLLMProvider()
+        else:
+            from ..providers.gemini import GeminiProvider
+            primary = GeminiProvider()
+            
+        self.provider_manager = ProviderManager(primary_provider=primary)
         
     async def execute_task(
         self, 
@@ -32,7 +37,8 @@ class BaseAgent:
         context: str, 
         schema: Optional[Any] = None,
         extra_capabilities: Optional[List[Capability]] = None,
-        max_tokens: Optional[int] = 4000
+        max_tokens: Optional[int] = 4000,
+        memory: Optional[Any] = None
     ) -> Any:
         
         if not PolicyLayer.validate_request(self.tenant_id, task_name, {"context": context}):
@@ -62,6 +68,17 @@ class BaseAgent:
                     capabilities=capabilities,
                     max_tokens=max_tokens
                 )
+                
+            if memory:
+                # Log prompt versioning to memory
+                prompts_used = memory.get("metadata").get("prompts_used", {})
+                prompts_used[task_name] = {
+                    "id": prompt.id,
+                    "version": prompt.version,
+                    "model": prompt.model or res.model_name,
+                    "temperature": prompt.temperature
+                }
+                memory.update_metadata("prompts_used", prompts_used)
                 
             telemetry_tracker.log_request(
                 tenant_id=self.tenant_id,

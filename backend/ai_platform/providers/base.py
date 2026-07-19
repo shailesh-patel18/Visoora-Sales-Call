@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 from ..schemas import ProviderResponse, Capability
 
-class BaseProvider(ABC):
+class LLMProvider(ABC):
     @property
     @abstractmethod
     def name(self) -> str:
@@ -11,6 +11,14 @@ class BaseProvider(ABC):
     @property
     @abstractmethod
     def supported_capabilities(self) -> List[Capability]:
+        pass
+
+    @abstractmethod
+    async def validate_connection(self) -> bool:
+        """
+        Validates the provider connection (e.g., API key, permissions).
+        Returns True if healthy, raises Exception if misconfigured.
+        """
         pass
 
     @abstractmethod

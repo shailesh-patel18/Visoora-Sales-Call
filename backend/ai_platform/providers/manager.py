@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from ..schemas import ProviderResponse, Capability
-from .base import BaseProvider
+from .base import LLMProvider
 
 logger = structlog.get_logger(__name__)
 
@@ -12,22 +12,24 @@ class ProviderManager:
     Dynamically routes AI requests to the best available provider 
     based on the requested capabilities.
     """
-    def __init__(self, primary_provider: BaseProvider, fallbacks: List[BaseProvider] = None):
+    def __init__(self, primary_provider: LLMProvider, fallbacks: List[LLMProvider] = None):
         self.primary = primary_provider
         self.fallbacks = fallbacks or []
         self.providers = [self.primary] + self.fallbacks
 
-    def _select_provider(self, capabilities: List[Capability]) -> BaseProvider:
+    def _select_provider(self, capabilities: List[Capability]) -> LLMProvider:
         """Selects the highest priority provider that supports all required capabilities."""
         if not capabilities:
             return self.primary
             
         for provider in self.providers:
             if all(cap in provider.supported_capabilities for cap in capabilities):
+                print(f"[DEBUG] _select_provider selected {provider.name}")
                 return provider
                 
         # If no provider supports all capabilities, log warning and use primary
         logger.warning("no_provider_for_all_capabilities", capabilities=[c.value for c in capabilities])
+        print(f"[DEBUG] _select_provider selected primary fallback {self.primary.name}")
         return self.primary
 
     @retry(

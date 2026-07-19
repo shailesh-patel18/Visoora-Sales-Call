@@ -1,6 +1,9 @@
 import asyncio
-from google.antigravity import tool, AgentSession
+from typing import Any
 from pipeline.states import CallStateContext
+
+def tool(func):
+    return func
 
 @tool
 async def trigger_sms_confirmation(phone_number: str, meeting_time: str) -> str:
@@ -25,7 +28,7 @@ async def mock_twilio_api_dispatch(phone: str, time: str):
     await asyncio.sleep(1.5) # Simulate Twilio API network round-trip delay
     print(f"[BG_WORKER] Twilio successfully dispatched text to {phone} for {time}")
 
-async def handle_sub_agent_handover(session: AgentSession, state_ctx: CallStateContext, user_utterance: str) -> str:
+async def handle_sub_agent_handover(session: Any, state_ctx: CallStateContext, user_utterance: str) -> str:
     """
     Triggered when state_ctx.current_state == 'OBJECTION'. 
     Extracts the conversation history, delegates the request to the 'ObjectionSpecialist' sub-agent,

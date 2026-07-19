@@ -6,19 +6,29 @@ from google import genai
 from google.genai import types
 
 from ..schemas import ProviderResponse, Capability
-from .base import BaseProvider
+from .base import LLMProvider
 
-class GeminiProvider(BaseProvider):
+class GeminiProvider(LLMProvider):
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or os.getenv("GOOGLE_API_KEY")
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY is not set.")
+            raise ValueError("GEMINI_API_KEY is not set.")
         self.client = genai.Client(api_key=self.api_key)
         self.default_model = "gemini-2.5-flash"
 
     @property
     def name(self) -> str:
         return "gemini"
+
+    async def validate_connection(self) -> bool:
+        try:
+            # Performs a lightweight validation check to ensure the key is active
+            model = await self.client.aio.models.get(model='gemini-2.5-flash')
+            if not model:
+                raise ValueError("Model not found")
+            return True
+        except Exception as e:
+            raise RuntimeError(f"Gemini LLM Provider validation failed: {str(e)}")
 
     @property
     def supported_capabilities(self) -> List[Capability]:

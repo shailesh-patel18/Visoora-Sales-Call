@@ -84,19 +84,19 @@ def log_critical(event: str, message: str, **kwargs):
 # ----------------------------------------------------
 # BOOT-TIME TELEPHONY DEPLOYMENT VALIDATION
 # ----------------------------------------------------
-def run_boot_time_validation():
+async def run_boot_time_validation():
     log_info("bootcheck_start", "Starting Production Telephony Orchestration Boot-time Diagnostics...")
     errors = []
     
-    # 1. Validate Antigravity SDK
+    # 1. Validate Gemini LLM Provider
     try:
-        import google.antigravity
-        assert hasattr(google.antigravity, "AgentSession"), "google.antigravity is missing 'AgentSession' class"
-        assert hasattr(google.antigravity, "tool"), "google.antigravity is missing 'tool' decorator"
-        log_info("bootcheck_ok_sdk", "Google Antigravity SDK verified successfully.")
+        from ai_platform.providers.gemini import GeminiProvider
+        provider = GeminiProvider()
+        await provider.validate_connection()
+        log_info("bootcheck_ok_gemini", "Gemini LLM Provider verified successfully.")
     except Exception as e:
-        errors.append(f"Antigravity SDK dependency check failed: {e}")
-        
+        errors.append(f"Gemini LLM Provider validation failed: {e}")
+
     # 2. Validate StateMachineController
     try:
         from pipeline.states import StateMachineController
@@ -144,7 +144,7 @@ from pipeline.vad import VoiceActivityDetector
 from server.storage_manager import call_session_tracker
 from memory.manager import memory_manager
 from compliance.gate import verify_compliance_gate
-from google.antigravity import AgentSession
+from pipeline.states import CallStateContext
 
 # Precompute G.711 Mu-Law lookup tables for sub-microsecond G.711 transcode speeds
 ULAW_TO_PCM = []
@@ -482,7 +482,7 @@ def check_dev_env_production_safety():
 async def startup_event():
     settings.validate_for_startup()
     check_dev_env_production_safety()
-    run_boot_time_validation()
+    await run_boot_time_validation()
     await rate_limiter.connect()
     # Start background job worker
     from server.worker import start_background_worker

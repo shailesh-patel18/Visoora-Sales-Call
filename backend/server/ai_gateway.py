@@ -4,7 +4,7 @@ import hashlib
 import structlog
 import datetime
 import asyncio
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 import instructor
@@ -38,6 +38,17 @@ class GroundedEmailDraft(BaseModel):
     subject: str = Field(..., description="Punchy subject line, max 8 words, no ALL CAPS.")
     body: str = Field(..., description="The email body.")
     citations: list[EmailCitation] = Field(..., description="The exact citations from the Prompt Context used to personalize the email.")
+
+class ICP(BaseModel):
+    segment: str = Field(description="The target customer segment (e.g. SaaS Founders, Healthcare IT)")
+    rationale: str = Field(description="Why this segment is a good fit based on the website")
+    confidence: int = Field(description="0-100 confidence score")
+    snippet: str = Field(description="Direct quote from the website proving this")
+    source_url: str = Field(description="The source URL")
+
+class ICPGenerationResponse(BaseModel):
+    icps: List[ICP]
+
 
 class AIGateway:
     def __init__(self):
@@ -121,7 +132,6 @@ class AIGateway:
         )
         
         try:
-            from server.onboarding_api import ICPGenerationResponse
             schema = ICPGenerationResponse.model_json_schema()
             data = await self._firecrawl_extract(source_url, prompt, schema)
             

@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Any
 from .base_agent import BaseAgent
 from ..prompts.registry import prompt_registry
 from ..schemas import PromptSchema, Capability
@@ -13,7 +13,7 @@ class EmailAgent(BaseAgent):
     Agent responsible for drafting emails.
     """
     
-    async def draft_email(self, context_str: str) -> EmailDraft:
+    async def draft_email(self, context_str: str, memory: Optional[Any] = None) -> EmailDraft:
         prompt_id = "email_draft_v1"
         if not prompt_registry.get_prompt(prompt_id):
             prompt_registry._prompts[prompt_id] = PromptSchema(
@@ -28,6 +28,7 @@ class EmailAgent(BaseAgent):
             task_name="draft_email",
             prompt_id=prompt_id,
             context=context_str,
-            schema=EmailDraft
+            schema=EmailDraft,
+            memory=memory
         )
         return result

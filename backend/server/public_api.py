@@ -229,3 +229,36 @@ async def sendgrid_webhook(request: Request):
     except Exception as e:
         logger.error("sendgrid_webhook_failed", error=str(e))
         return {"status": "error", "message": str(e)}
+
+@public_router.get("/health")
+async def health_check():
+    """
+    Health monitoring endpoint.
+    Reports the status of the database, Gemini, and prospecting providers.
+    """
+    from server.storage_manager import supabase_admin_client
+    from server.prospecting.metrics_registry import global_metrics_registry
+    
+    health_status = {}
+    
+    # Database
+    if supabase_admin_client:
+        health_status["database"] = "healthy"
+    else:
+        health_status["database"] = "unconfigured"
+
+    # Gemini
+    gemini_key = os.getenv("GEMINI_API_KEY")
+    if gemini_key and gemini_key.strip():
+        health_status["gemini"] = "healthy"
+    else:
+        health_status["gemini"] = "unconfigured (missing API key)"
+
+    # Development Mode Check
+    dev_mode = os.getenv("DEVELOPMENT_MODE", "false").lower() == "true"
+    health_status["mode"] = "development" if dev_mode else "production"
+
+    # Providers from metrics registry
+    health_status["providers"] = global_metrics_registry.get_all_metrics()
+    
+    return health_status

@@ -15,6 +15,8 @@ class Capability(str, Enum):
 class PromptSchema(BaseModel):
     id: str
     version: int
+    model: Optional[str] = None
+    temperature: float = 0.7
     owner: str = "system"
     description: str
     supported_capabilities: List[Capability] = Field(default_factory=list)
