@@ -11,7 +11,9 @@ from contextvars import ContextVar
 
 from security.config import settings
 from server.lifespan import lifespan
-from utils.logger import log_structured
+import structlog
+
+logger = structlog.get_logger("visoora_main")
 
 app = FastAPI(title="Visoora Engine", version="1.0.0", lifespan=lifespan)
 
@@ -22,7 +24,7 @@ tenant_id_var: ContextVar[str] = ContextVar("tenant_id", default="anonymous")
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     correlation_id = correlation_id_var.get()
-    log_structured("ERROR", "unhandled_exception", f"Unhandled exception: {exc}", correlation_id=correlation_id, method=request.method, url=str(request.url), error=str(exc))
+    logger.error("unhandled_exception", exception=str(exc), correlation_id=correlation_id, method=request.method, url=str(request.url))
     return JSONResponse(
         status_code=500,
         content={"success": False, "error": "Internal Server Error", "detail": str(exc)},

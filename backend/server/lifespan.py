@@ -11,7 +11,7 @@ import structlog
 logger = structlog.get_logger("visoora_lifespan")
 
 # Note: We import rate_limiter and validation locally to avoid circular imports if necessary
-from server.services.rate_limiter import rate_limiter
+from security.rate_limiter import rate_limiter
 
 def check_dev_env_production_safety():
     if settings.app_env == "development":
