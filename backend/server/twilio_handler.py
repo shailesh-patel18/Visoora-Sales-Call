@@ -349,258 +349,13 @@ active_calls_count = 0
 global_vad_interruptions = 0
 global_avg_latency_ms = 45.0
 
-app = FastAPI(title="Visoora Engine", version="1.0.0")
+# We now import the global app from main if absolutely necessary, but we register routes to this router.
+from fastapi import APIRouter
+router = APIRouter()
 
-# ----------------------------------------------------
-# GLOBAL EXCEPTION HANDLERS
-# ----------------------------------------------------
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    logger.error("unhandled_exception", method=request.method, url=str(request.url), error=str(exc))
-    return JSONResponse(
-        status_code=500,
-        content={"success": False, "error": "Internal Server Error", "detail": str(exc)},
-    )
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"success": False, "error": exc.detail},
-    )
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    return JSONResponse(
-        status_code=422,
-        content={"success": False, "error": "Validation Error", "detail": exc.errors()},
-    )
-
-# Add CORS middleware to allow Next.js browser API access
-from fastapi.middleware.cors import CORSMiddleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-from fastapi.staticfiles import StaticFiles
-app.mount("/recordings", StaticFiles(directory="recordings"), name="recordings")
-
-# ----------------------------------------------------
-# ROUTER REGISTRATION
-# ----------------------------------------------------
-from server.analytics_api import analytics_router
-from server.public_api import public_router
-from server.services.business_activation import activation_router
-from server.mission_api import mission_router
-
-app.include_router(analytics_router, prefix="/api")
-app.include_router(public_router)
-app.include_router(activation_router)
-app.include_router(mission_router)
-
-# Initialize OpenTelemetry tracer on app creation
-init_tracer(
-    service_name="visoora-telephony",
-    otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
-)
-
-# Set Prometheus service info labels
-SERVICE_INFO.info({
-    "version": "1.0.0",
-    "service": "visoora-telephony",
-    "pod_id": os.getenv("POD_ID", "local"),
-})
-
-# Instrument FastAPI with OpenTelemetry (auto-instruments HTTP spans)
-try:
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    # FastAPIInstrumentor.instrument_app(app) # Temporarily disabled due to CORS/OPTIONS bug with _IncludedRouter
-    log_info("otel_fastapi_instrumented", "FastAPI auto-instrumentation temporarily disabled.")
-except ImportError:
-    log_warn("otel_fastapi_skip", "opentelemetry-instrumentation-fastapi not installed — skipping auto-instrumentation.")
-
-import signal
-
-async def handle_graceful_shutdown():
-    global is_shutting_down
-    if is_shutting_down:
-        return
-    is_shutting_down = True
-    log_info("graceful_shutdown_start", f"SIGTERM/SIGINT received. Active calls remaining: {active_calls_count}. Draining up to 300s.")
-    
-    # Wait for active calls to complete (graceful drainage)
-    drain_sec = 300
-    while active_calls_count > 0 and drain_sec > 0:
-        await asyncio.sleep(1)
-        drain_sec -= 1
-        if drain_sec % 30 == 0:
-            log_info("graceful_shutdown_drain", f"Draining active calls... {active_calls_count} remaining, {drain_sec}s left.")
-            
-    log_info("graceful_shutdown_complete", "All active calls drained or timeout reached. Exiting process.")
-    # Force exit cleanly
-    os._exit(0)
-
-def check_dev_env_production_safety():
-    """
-    Boot-time safety guard: prevents deploying with APP_ENV=development into environments
-    that are reachable from non-localhost hosts (e.g., staging, production behind reverse proxies).
-
-    If APP_ENV is "development" but the server appears to be bound to 0.0.0.0 or a non-loopback
-    address (detected via SERVER_PUBLIC_DOMAIN being set), log a CRITICAL alert.
-    This makes the misconfiguration immediately visible in any log aggregator.
-    """
-    from security.config import settings as _settings
-    if _settings.app_env == "development":
-        public_domain = os.getenv("SERVER_PUBLIC_DOMAIN", "").strip()
-        port = os.getenv("PORT", "8000")
-        if public_domain:
-            # APP_ENV=development with a public tunnel domain configured — this is dangerous.
-            # The dev fallback bypass in rbac.py will NOT grant access through the ngrok tunnel
-            # (that clause was removed), but the mismatch still warrants an operator warning.
-            log_critical(
-                "dev_env_public_domain_mismatch",
-                "SECURITY WARNING: APP_ENV=development is set but SERVER_PUBLIC_DOMAIN is also configured. "
-                "The dev auth bypass is DISABLED for ngrok requests, but this configuration is unusual. "
-                "If this is a production or staging deployment, set APP_ENV=production immediately.",
-                server_public_domain=public_domain
-            )
-        else:
-            log_info(
-                "dev_env_localhost_only",
-                f"APP_ENV=development confirmed. Dev auth bypass active for localhost:{port} requests only."
-            )
-
-@app.on_event("startup")
-async def startup_event():
-    settings.validate_for_startup()
-    check_dev_env_production_safety()
-    await run_boot_time_validation()
-    await rate_limiter.connect()
-    # Start background job worker
-    from server.worker import start_background_worker
-    await start_background_worker()
-    # Register SIGTERM and SIGINT graceful shutdown signal handlers
-    try:
-        loop = asyncio.get_running_loop()
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(handle_graceful_shutdown()))
-    except Exception as e:
-        # Fallback for systems (like local Windows machines) where loop.add_signal_handler might raise errors
-        log_warn("sigterm_handler_fallback", f"Standard loop signal handler registration bypassed: {e}. Registering signal hook.")
-        signal.signal(signal.SIGTERM, lambda s, f: asyncio.create_task(handle_graceful_shutdown()))
-        signal.signal(signal.SIGINT, lambda s, f: asyncio.create_task(handle_graceful_shutdown()))
-
-# Add RFC 7807 problem details exception handlers
-app.add_exception_handler(SecurityException, rfc7807_exception_handler)
-app.add_exception_handler(HTTPException, rfc7807_exception_handler)
-
-# Include compliance router for DNC lists management
-app.include_router(compliance_router)
-
-# Include core CRM pipeline router
-from crm.router import router as crm_router
-app.include_router(crm_router)
-
-# Include Visoora inbound calling webhook and media routers
-from server.inbound_handler import inbound_router
-app.include_router(inbound_router)
-
-# Include Twilio two-way SMS webhook router
-from services.sms import sms_router
-app.include_router(sms_router)
-
-# Include onboarding wizard and phone provisioning router
-from server.onboarding_api import router as onboarding_router
-app.include_router(onboarding_router)
-
-# Include background jobs router
-from server.job_router import router as job_router
-app.include_router(job_router)
-
-# Include SaaS Stripe billing and usage metering router
-from billing.router import billing_router
-app.include_router(billing_router)
-
-# Include Phase A AI Sales Employee router
-from sales_employee.router import sales_employee_router, public_sales_router
-from server.ws_mission_router import ws_mission_router
-app.include_router(sales_employee_router)
-app.include_router(public_sales_router)
-app.include_router(ws_mission_router)
-
-# Include authentication proxy router
-from security.auth_router import auth_router
-app.include_router(auth_router, prefix="/api/v1")
-
-# Include draft router
-from server.draft_router import router as draft_router
-from server.events_api import router as events_router
-
-app.include_router(draft_router, prefix="/api/v1")
-app.include_router(events_router)
-app.include_router(onboarding_router)
-
-# Prometheus metrics endpoint — unprotected for scraper access
-@app.get("/metrics")
-async def prometheus_metrics():
-    """Prometheus scrape endpoint. Returns all registered metrics."""
-    body, content_type = get_metrics_response()
-    return Response(content=body, media_type=content_type)
-
-# Health check — unprotected
-@app.get("/health")
-async def health_check():
-    return {
-        "status": "healthy",
-        "service": "visoora-telephony-orchestrator",
-        "active_calls": active_calls_count,
-        "shutting_down": is_shutting_down,
-    }
-
-# Exception tracing middleware with correlation IDs and context variables
-@app.middleware("http")
-async def exception_tracing_middleware(request: Request, call_next):
-    correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
-    correlation_id_var.set(correlation_id)
-    request.state.correlation_id = correlation_id
-    
-    # Check if this is an authenticated request to set contextvars
-    auth_header = request.headers.get("Authorization")
-    tenant_id = "anonymous"
-    if auth_header and auth_header.startswith("Bearer "):
-        try:
-            token = auth_header.split(" ")[1]
-            # Fast unverified parse to extract log context
-            import jwt
-            payload = jwt.decode(token, options={"verify_signature": False})
-            tenant_id = payload.get("tenant_id") or "default"
-        except Exception:
-            pass
-    tenant_id_var.set(tenant_id)
-
-    try:
-        response = await call_next(request)
-        response.headers["X-Correlation-ID"] = correlation_id
-        return response
-    except Exception as exc:
-        log_payload = {
-            "traceback": traceback.format_exc(),
-            "path": request.url.path,
-            "method": request.method
-        }
-        log_structured("CRITICAL", "http_request_failed", f"Unhandled HTTP exception: {exc}", correlation_id=correlation_id, **log_payload)
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal Server Error", "correlation_id": correlation_id}
-        )
+# Global variables that were used by the health check
+active_calls_count = getattr(globals(), 'active_calls_count', 0)
+is_shutting_down = getattr(globals(), 'is_shutting_down', False)
 
 # Twilio Credentials
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "ACXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX")
@@ -628,7 +383,7 @@ def _websocket_url_from_base(base_url: str, path: str, params: Dict[str, str]) -
     query = urlencode(params, doseq=False)
     return f"{ws_scheme}://{parsed.netloc}{path}?{query}"
 
-@app.post("/incoming-call")
+@router.post("/incoming-call")
 async def handle_incoming_call(request: Request, verified: bool = Depends(verify_twilio_signature)):
     """
     Twilio voice webhook endpoint.
@@ -708,7 +463,7 @@ async def handle_incoming_call(request: Request, verified: bool = Depends(verify
 """
     return Response(content=twiml, media_type="application/xml")
 
-@app.post("/api/twilio-status-callback")
+@router.post("/api/twilio-status-callback")
 async def handle_twilio_status_callback(
     request: Request, 
     verified: bool = Depends(verify_twilio_signature),
@@ -761,7 +516,7 @@ async def handle_twilio_status_callback(
         log_error("twilio_status_callback_error", f"Error in status callback route: {e}")
         return Response(status_code=500)
 
-@app.websocket("/media-stream")
+@router.websocket("/media-stream")
 async def handle_media_stream(websocket: WebSocket):
     """
     Bi-directional VoIP WebSocket streaming handler.
@@ -1962,7 +1717,7 @@ async def handle_media_stream(websocket: WebSocket):
 # ----------------------------------------------------
 # LIVE FRONTEND TRANSCRIPT ENDPOINT
 # ----------------------------------------------------
-@app.websocket("/api/live-ws")
+@router.websocket("/api/live-ws")
 async def live_ws_endpoint(websocket: WebSocket):
     """
     WebSocket broadcast channel for frontend dashboards.
@@ -2018,12 +1773,12 @@ async def live_ws_endpoint(websocket: WebSocket):
 # ----------------------------------------------------
 # HIGH-PERFORMANCE HEALTH & PROMETHEUS METRICS ENDPOINTS
 # ----------------------------------------------------
-@app.get("/health/live")
+@router.get("/health/live")
 async def health_live():
     """Liveness check probe. Simply returns 200 OK."""
     return {"status": "healthy", "live": True}
 
-@app.get("/health/ready")
+@router.get("/health/ready")
 async def health_ready():
     """
     Readiness check probe.
@@ -2058,7 +1813,7 @@ async def health_ready():
         
     return {"status": "ready", "active_calls": active_calls_count}
 
-@app.get("/health/metrics")
+@router.get("/health/metrics")
 async def health_metrics():
     """
     Prometheus metrics exporter.
@@ -2088,7 +1843,7 @@ vad_interruptions_total {global_vad_interruptions}
 # ----------------------------------------------------
 # CAMPAIGN MANAGER ROUTING APIS (RBAC PROTECTED)
 # ----------------------------------------------------
-@app.get("/api/campaigns")
+@router.get("/api/campaigns")
 async def get_campaign_leads(user: UserPrincipal = Depends(RoleChecker(["viewer", "agent", "admin"]))):
     """Reads campaign leads from campaign_leads.json inside a thread-safe asyncio lock."""
     async with campaign_file_lock:
@@ -2101,7 +1856,7 @@ async def get_campaign_leads(user: UserPrincipal = Depends(RoleChecker(["viewer"
             return {"error": str(e)}
     return []
 
-@app.post("/api/campaigns/add")
+@router.post("/api/campaigns/add")
 async def add_campaign_lead(lead: dict, user: UserPrincipal = Depends(RoleChecker(["admin"]))):
     """Appends a new lead to campaign_leads.json inside a thread-safe lock."""
     async with campaign_file_lock:
@@ -2129,7 +1884,7 @@ async def add_campaign_lead(lead: dict, user: UserPrincipal = Depends(RoleChecke
         except Exception as e:
             return {"success": False, "error": str(e)}
 
-@app.post("/api/campaigns/dial")
+@router.post("/api/campaigns/dial")
 async def dial_campaign_lead(payload: dict, user: UserPrincipal = Depends(RoleChecker(["agent", "admin"]))):
     """
     Triggers outbound dialing sequence for a specific lead.
@@ -2172,7 +1927,7 @@ async def dial_campaign_lead(payload: dict, user: UserPrincipal = Depends(RoleCh
     }, user=user)
     return res
 
-@app.post("/make-call")
+@router.post("/make-call")
 async def trigger_outbound_call(payload: Dict[str, str], user: UserPrincipal = Depends(RoleChecker(["agent", "admin"]))):
     """
     Initiates an outbound cold call using Twilio API, routing to our /incoming-call webhook.
@@ -2278,7 +2033,7 @@ async def trigger_outbound_call(payload: Dict[str, str], user: UserPrincipal = D
             await rate_limiter.release_call(tenant_id, call_id)
             return {"success": False, "error": str(e)}
 
-@app.get("/api/logs")
+@router.get("/api/logs")
 async def get_call_logs(user: UserPrincipal = Depends(RoleChecker(["viewer", "agent", "admin"]))):
     """
     Returns call logs telemetry from Supabase, cascading to local JSON registry if unconfigured.

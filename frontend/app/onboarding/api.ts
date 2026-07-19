@@ -21,7 +21,11 @@ export interface AnalyzeDomainResponse {
   brand_voice_tone: EvidenceStringField;
 }
 
-export async function analyzeDomain(website: string): Promise<AnalyzeDomainResponse> {
+export interface JobResponse {
+  job_id: string;
+}
+
+export async function startDomainAnalysis(website: string): Promise<JobResponse> {
   const response = await fetch(`${BACKEND_URL}/api/onboarding/analyze-domain`, {
     method: "POST",
     headers: {
@@ -36,7 +40,7 @@ export async function analyzeDomain(website: string): Promise<AnalyzeDomainRespo
     if (typeof errorData.detail === 'object' && errorData.detail !== null) {
       throw new Error(JSON.stringify(errorData.detail));
     }
-    throw new Error(errorData.detail || "Failed to analyze domain");
+    throw new Error(errorData.detail || "Failed to start domain analysis");
   }
 
   return response.json();

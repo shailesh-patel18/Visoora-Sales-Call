@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 import instructor
 from openai import AsyncOpenAI
+from security.config import settings
+from ai_platform.providers.openrouter import OpenRouterProvider
+from ai_platform.providers.openai_provider import OpenAIProvider
 
 logger = structlog.get_logger("ai_gateway")
 
@@ -54,6 +57,24 @@ class AIGateway:
     def __init__(self):
         self.mock_level = os.getenv("MOCK_AI", "NONE").upper()
         
+        provider_name = settings.llm_provider.lower()
+        
+        if provider_name == "openrouter":
+            self.provider_cls = OpenRouterProvider
+        elif provider_name == "openai":
+            self.provider_cls = OpenAIProvider
+        else:
+            self.provider_cls = OpenRouterProvider
+            
+    def _get_provider(self, task_type: str):
+        if task_type == "extraction":
+            return self.provider_cls(model_name=settings.model_extraction)
+        elif task_type == "reasoning":
+            return self.provider_cls(model_name=settings.model_reasoning)
+        elif task_type == "email":
+            return self.provider_cls(model_name=settings.model_email)
+        return self.provider_cls()
+        
     def _log_cost(self, provider: str, model: str, latency_ms: float, tokens_in: int = 0, tokens_out: int = 0):
         logger.info(
             "ai_api_cost",
@@ -96,21 +117,22 @@ class AIGateway:
         start_time = time.time()
         
         prompt = (
-            "You are an expert business analyst. Extract detailed business insights from this website based on the schema.\n"
-            "1. You must never invent information.\n"
+            "You are an expert business analyst. Extract detailed business insights based on the provided website data.\n"
+            "1. You must never invent information. Base everything ONLY on the provided JSON data.\n"
             "2. If you cannot find strong evidence in the text, set the value to 'Unable to verify', confidence to 0, and snippet to 'N/A'.\n"
-            f"3. Set source_url to {source_url} for all valid snippets.\n"
+            f"3. Set source_url to {source_url} for all valid snippets.\n\n"
+            f"Website Data:\n{json.dumps(structured_data, indent=2)}"
         )
         
         try:
             from server.onboarding_api import AnalyzeDomainResponse
-            schema = AnalyzeDomainResponse.model_json_schema()
-            data = await self._firecrawl_extract(source_url, prompt, schema)
+            provider = self._get_provider("extraction")
+            data = await provider.generate_structured(prompt, AnalyzeDomainResponse)
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="firecrawl", model="extract", latency_ms=latency)
+            self._log_cost(provider=provider.name, model=provider.model_name, latency_ms=latency)
             
-            return AnalyzeDomainResponse(**data)
+            return data
         except Exception as e:
             logger.error("ai_gateway_extraction_failed", error=str(e), url=url)
             raise
@@ -125,20 +147,22 @@ class AIGateway:
             source_url = "https://example.com"
             
         prompt = (
-            "You are an ICP extraction engine. Based on this company's website, extract Ideal Customer Profile (ICP) segments.\n"
+            "You are an ICP extraction engine. Based on this company's data, extract Ideal Customer Profile (ICP) segments.\n"
             "1. You must never invent information.\n"
             "2. Every ICP MUST be backed by a direct quote (snippet) proving this ICP is viable.\n"
-            f"3. Ensure the source_url is {source_url}.\n"
+            f"3. Ensure the source_url is {source_url}.\n\n"
+            f"Company Data:\n{json.dumps(business_brain_data, indent=2)}"
         )
         
         try:
-            schema = ICPGenerationResponse.model_json_schema()
-            data = await self._firecrawl_extract(source_url, prompt, schema)
+            from server.onboarding_api import ICPGenerationResponse
+            provider = self._get_provider("reasoning")
+            data = await provider.generate_structured(prompt, ICPGenerationResponse)
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="firecrawl", model="extract", latency_ms=latency)
+            self._log_cost(provider=provider.name, model=provider.model_name, latency_ms=latency)
             
-            return ICPGenerationResponse(**data)
+            return data
             
         except Exception as e:
             logger.error("ai_gateway_icp_generation_failed", error=str(e))
@@ -154,17 +178,18 @@ class AIGateway:
             "1. You must never invent information.\n"
             "2. Every extracted field MUST be backed by a direct quote (snippet).\n"
             f"3. Set source_url to {source_url}.\n\n"
-            f"{prompt}"
+            f"{prompt}\n\n"
+            f"Data Context:\n{json.dumps(data, indent=2)}"
         )
         
         try:
-            schema = response_model.model_json_schema()
-            res_data = await self._firecrawl_extract(source_url, full_prompt, schema)
+            provider = self._get_provider("extraction")
+            res_data = await provider.generate_structured(full_prompt, response_model)
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="firecrawl", model="extract", latency_ms=latency)
+            self._log_cost(provider=provider.name, model=provider.model_name, latency_ms=latency)
             
-            return response_model(**res_data)
+            return res_data
         except Exception as e:
             logger.error("ai_gateway_knowledge_extraction_failed", error=str(e))
             raise
@@ -189,8 +214,7 @@ class AIGateway:
         import json
         start_time = time.time()
         
-        prompt_version = "v2.1_firecrawl"
-        model_name = "firecrawl_extract"
+        prompt_version = "v2.2_openrouter"
         
         hint_instruction = f"\n\nReviewer instruction: {hint}" if hint else ""
         system_prompt = (
@@ -203,14 +227,13 @@ class AIGateway:
         
         try:
             from server.onboarding_api import GroundedEmailDraft
-            schema = GroundedEmailDraft.model_json_schema()
-            # Pass a dummy url to Firecrawl so it works
-            data = await self._firecrawl_extract("https://example.com", system_prompt, schema)
+            provider = self._get_provider("email")
+            data = await provider.generate_structured(system_prompt, GroundedEmailDraft)
             
             latency = (time.time() - start_time) * 1000
-            self._log_cost(provider="firecrawl", model="extract", latency_ms=latency)
+            self._log_cost(provider=provider.name, model=provider.model_name, latency_ms=latency)
             
-            return GroundedEmailDraft(**data), {"prompt_version": prompt_version, "model": model_name, "temperature": 0.4}
+            return data, {"prompt_version": prompt_version, "model": provider.model_name, "temperature": 0.4}
         except Exception as e:
             logger.error("ai_gateway_email_draft_failed", error=str(e))
             raise

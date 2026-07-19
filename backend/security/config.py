@@ -46,7 +46,14 @@ class SecuritySettings(BaseModel):
     # Machine-to-Machine keys
     api_key_header_name: str = "X-API-Key"
     openai_api_key: str = Field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
+    openrouter_api_key: str = Field(default_factory=lambda: os.getenv("OPEN_ROUTER", os.getenv("OPENROUTER_API_KEY", "")))
     firecrawl_api_key: str = Field(default_factory=lambda: os.getenv("FIRECRAWL_API_KEY", ""))
+    
+    # AI Gateway Config
+    llm_provider: str = Field(default_factory=lambda: os.getenv("LLM_PROVIDER", "openrouter"))
+    model_extraction: str = Field(default_factory=lambda: os.getenv("MODEL_EXTRACTION", "deepseek/deepseek-chat"))
+    model_reasoning: str = Field(default_factory=lambda: os.getenv("MODEL_REASONING", "google/gemini-2.5-flash"))
+    model_email: str = Field(default_factory=lambda: os.getenv("MODEL_EMAIL", "openai/gpt-4o"))
     system_api_keys: Set[str] = Field(default_factory=lambda: {
         k.strip() for k in os.getenv("SYSTEM_API_KEYS", "").split(",") if k.strip()
     })

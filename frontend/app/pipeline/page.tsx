@@ -26,22 +26,22 @@ import { getAuthHeaders, useAuthStore } from "../auth/store";
 // ====================================================
 function generateMockPipeline(): PipelineStage[] {
   const stages: PipelineStage[] = [
-    { id: "s1", name: "New Lead", position: 0, probability_pct: 10, is_terminal: false, deals: [] },
-    { id: "s2", name: "Qualified", position: 1, probability_pct: 25, is_terminal: false, deals: [] },
-    { id: "s3", name: "Demo Booked", position: 2, probability_pct: 50, is_terminal: false, deals: [] },
-    { id: "s4", name: "Proposal", position: 3, probability_pct: 75, is_terminal: false, deals: [] },
-    { id: "s5", name: "Won", position: 4, probability_pct: 100, is_terminal: true, deals: [] },
+    { id: "s1", name: "Business understood ✓", position: 0, probability_pct: 10, is_terminal: false, deals: [] },
+    { id: "s2", name: "Prospect researched ✓", position: 1, probability_pct: 25, is_terminal: false, deals: [] },
+    { id: "s3", name: "Email personalized ✓", position: 2, probability_pct: 50, is_terminal: false, deals: [] },
+    { id: "s4", name: "Waiting for approval", position: 3, probability_pct: 75, is_terminal: false, deals: [] },
+    { id: "s5", name: "Outreach launched", position: 4, probability_pct: 100, is_terminal: true, deals: [] },
     { id: "s6", name: "Lost", position: 5, probability_pct: 0, is_terminal: true, deals: [] },
   ];
 
   const mockDeals: Deal[] = [
-    { id: "d1", tenant_id: "acme", contact_id: "c1", contact_name: "Sarah Connor", company_name: "Cyberdyne", stage_id: "s1", stage_name: "New Lead", title: "Cyberdyne AI Suite", value_usd: 12000, currency: "USD", ai_sentiment: "positive", ai_next_action: "Schedule demo", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d2", tenant_id: "acme", contact_id: "c2", contact_name: "Tony Stark", company_name: "Stark Industries", stage_id: "s2", stage_name: "Qualified", title: "Stark Enterprise Plan", value_usd: 45000, currency: "USD", ai_sentiment: "positive", ai_next_action: "Send proposal", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d3", tenant_id: "acme", contact_id: "c3", contact_name: "Bruce Wayne", company_name: "Wayne Enterprises", stage_id: "s3", stage_name: "Demo Booked", title: "Wayne Security Suite", value_usd: 85000, currency: "USD", ai_sentiment: "neutral", ai_next_action: "Conduct demo", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d4", tenant_id: "acme", contact_id: "c4", contact_name: "Diana Prince", company_name: "Themyscira Inc", stage_id: "s1", stage_name: "New Lead", title: "Themyscira Integration", value_usd: 8000, currency: "USD", ai_sentiment: "unknown", ai_next_action: "Qualify lead", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d5", tenant_id: "acme", contact_id: "c5", contact_name: "Peter Parker", company_name: "Daily Bugle", stage_id: "s4", stage_name: "Proposal", title: "Bugle Media Package", value_usd: 22000, currency: "USD", ai_sentiment: "negative", ai_next_action: "Handle objection", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d6", tenant_id: "acme", contact_id: "c6", contact_name: "Steve Rogers", company_name: "Shield Corp", stage_id: "s5", stage_name: "Won", title: "Shield Federal Contract", value_usd: 120000, currency: "USD", ai_sentiment: "positive", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
-    { id: "d7", tenant_id: "acme", contact_id: "c7", contact_name: "Clark Kent", company_name: "Daily Planet", stage_id: "s2", stage_name: "Qualified", title: "Planet CRM Upgrade", value_usd: 15000, currency: "USD", ai_sentiment: "neutral", ai_next_action: "Book call", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d1", tenant_id: "acme", contact_id: "c1", contact_name: "Sarah Connor", company_name: "Cyberdyne", stage_id: "s1", stage_name: "Business understood ✓", title: "Cyberdyne AI Suite", value_usd: 12000, currency: "USD", ai_sentiment: "positive", ai_next_action: "Research tech stack", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d2", tenant_id: "acme", contact_id: "c2", contact_name: "Tony Stark", company_name: "Stark Industries", stage_id: "s2", stage_name: "Prospect researched ✓", title: "Stark Enterprise Plan", value_usd: 45000, currency: "USD", ai_sentiment: "positive", ai_next_action: "Draft email", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d3", tenant_id: "acme", contact_id: "c3", contact_name: "Bruce Wayne", company_name: "Wayne Enterprises", stage_id: "s3", stage_name: "Email personalized ✓", title: "Wayne Security Suite", value_usd: 85000, currency: "USD", ai_sentiment: "neutral", ai_next_action: "Send for approval", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d4", tenant_id: "acme", contact_id: "c4", contact_name: "Diana Prince", company_name: "Themyscira Inc", stage_id: "s1", stage_name: "Business understood ✓", title: "Themyscira Integration", value_usd: 8000, currency: "USD", ai_sentiment: "unknown", ai_next_action: "Extract constraints", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d5", tenant_id: "acme", contact_id: "c5", contact_name: "Peter Parker", company_name: "Daily Bugle", stage_id: "s4", stage_name: "Waiting for approval", title: "Bugle Media Package", value_usd: 22000, currency: "USD", ai_sentiment: "negative", ai_next_action: "Review drafts", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d6", tenant_id: "acme", contact_id: "c6", contact_name: "Steve Rogers", company_name: "Shield Corp", stage_id: "s5", stage_name: "Outreach launched", title: "Shield Federal Contract", value_usd: 120000, currency: "USD", ai_sentiment: "positive", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
+    { id: "d7", tenant_id: "acme", contact_id: "c7", contact_name: "Clark Kent", company_name: "Daily Planet", stage_id: "s2", stage_name: "Prospect researched ✓", title: "Planet CRM Upgrade", value_usd: 15000, currency: "USD", ai_sentiment: "neutral", ai_next_action: "Find objections", last_activity_date: new Date().toISOString(), created_at: new Date().toISOString() },
   ];
 
   mockDeals.forEach((deal) => {

@@ -137,13 +137,12 @@ def _save_local_json(filename: str, data: List[Dict[str, Any]]):
 # DYNAMIC PIPELINE SEEDER
 # ====================================================
 DEFAULT_STAGES = [
-    {"name": "New Lead", "position": 1, "probability_pct": 10, "is_terminal": False},
-    {"name": "Qualified", "position": 2, "probability_pct": 30, "is_terminal": False},
-    {"name": "Demo Booked", "position": 3, "probability_pct": 50, "is_terminal": False},
-    {"name": "Negotiation/Demo", "position": 4, "probability_pct": 85, "is_terminal": False},
-    {"name": "Stale", "position": 5, "probability_pct": 10, "is_terminal": False},
-    {"name": "Closed Won", "position": 6, "probability_pct": 100, "is_terminal": True},
-    {"name": "Closed Lost", "position": 7, "probability_pct": 0, "is_terminal": True},
+    {"name": "Business understood ✓", "position": 0, "probability_pct": 10, "is_terminal": False},
+    {"name": "Prospect researched ✓", "position": 1, "probability_pct": 25, "is_terminal": False},
+    {"name": "Email personalized ✓", "position": 2, "probability_pct": 50, "is_terminal": False},
+    {"name": "Waiting for approval", "position": 3, "probability_pct": 75, "is_terminal": False},
+    {"name": "Outreach launched", "position": 4, "probability_pct": 100, "is_terminal": True},
+    {"name": "Lost", "position": 5, "probability_pct": 0, "is_terminal": True},
 ]
 
 async def get_or_seed_stages(tenant_id: str) -> List[Dict[str, Any]]:

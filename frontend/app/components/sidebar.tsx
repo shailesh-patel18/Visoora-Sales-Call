@@ -33,18 +33,11 @@ import { BACKEND_URL } from "../config";
 import { getAuthHeaders } from "../auth/store";
 
 const workflowSteps = [
-  { step: 1, group: "Foundation", href: "/onboarding", label: "Domain Analysis", icon: Activity, isExternal: true },
-  { step: 2, group: "Foundation", href: "/business-map", label: "ICP & Personas", icon: BrainCircuit },
-  { step: 3, group: "Foundation", href: "/playbooks", label: "Objections", icon: BookOpen },
-  { step: 4, group: "The Fuel", href: "/settings/email", label: "Integrations", icon: Mail },
-  { step: 5, group: "The Fuel", href: "/contacts", label: "Audience", icon: Users },
-  { step: 6, group: "Strategy", href: "/campaigns", label: "Growth Mission", icon: Target },
-  { step: 7, group: "Strategy", href: "/agents", label: "AI Specialists", icon: Bot },
-  { step: 8, group: "Execution", href: "/inbox", label: "Inbox Approvals", icon: ShieldAlert, badgeKey: "inbox" },
-  { step: 9, group: "Execution", href: "/outbound", label: "Launch Outbound", icon: Zap },
-  { step: 10, group: "Execution", href: "/calls", label: "Inbound Calls", icon: Phone },
-  { step: 11, group: "Outcomes", href: "/pipeline", label: "Pipeline", icon: Kanban },
-  { step: 12, group: "Outcomes", href: "/dashboard", label: "Analytics", icon: Activity },
+  { step: 1, group: "Core", href: "/dashboard", label: "Mission", icon: Activity },
+  { step: 2, group: "Core", href: "/business-map", label: "Business Knowledge", icon: BrainCircuit },
+  { step: 3, group: "Core", href: "/contacts", label: "Prospects", icon: Users },
+  { step: 4, group: "Core", href: "/inbox", label: "Inbox", icon: Mail, badgeKey: "inbox" },
+  { step: 5, group: "Core", href: "/pipeline", label: "Pipeline", icon: Kanban },
 ];
 
 export function Sidebar() {
@@ -122,17 +115,18 @@ export function Sidebar() {
       {/* Workflow Steps Tracker */}
       <div className="flex-1 overflow-y-auto py-4 px-2 space-y-1 custom-scrollbar">
         {workflowSteps.map((item, idx) => {
-          // Group Headers
-          const showGroupHeader = idx === 0 || workflowSteps[idx - 1].group !== item.group;
           
-          const isLocked = item.step > highestCompletedStep + 1 && !item.isExternal;
-          const isActive = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href)) || (item.isExternal && pathname?.startsWith(item.href));
+          // Group Headers
+          const showGroupHeader = (idx === 0 || workflowSteps[idx - 1].group !== item.group);
+          
+          const isLocked = false; // Disable strict linear locking for now
+          const isActive = pathname === item.href || (item.href !== "/" && pathname?.startsWith(item.href));
           const isCompleted = item.step <= highestCompletedStep;
           const Icon = item.icon;
           
           return (
             <React.Fragment key={item.step}>
-              {showGroupHeader && !sidebarCollapsed && (
+              {showGroupHeader && !sidebarCollapsed && highestCompletedStep >= 2 && (
                 <div className="pt-4 pb-1">
                   <h4 className="px-3 text-[10px] font-bold uppercase tracking-wider text-gray-500">
                     {item.group}
