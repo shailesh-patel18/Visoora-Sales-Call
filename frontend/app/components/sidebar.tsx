@@ -139,7 +139,7 @@ export function Sidebar() {
                 onClick={(e) => {
                   if (isLocked) {
                     e.preventDefault();
-                  } else if (!item.isExternal) {
+                  } else {
                     setWorkflowStep(item.step);
                   }
                 }}
