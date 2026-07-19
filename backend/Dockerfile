@@ -53,4 +53,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Default to one worker because Twilio Media Streams and local fallbacks are in-memory.
 # Scale workers only when Redis/Supabase are configured and sticky routing is in place.
-CMD ["sh", "-c", "gunicorn server.twilio_handler:app --workers ${WEB_CONCURRENCY:-1} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --graceful-timeout 30 --keep-alive 30"]
+CMD ["sh", "-c", "gunicorn server.main:app --workers ${WEB_CONCURRENCY:-1} --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT:-8000} --timeout 120 --graceful-timeout 30 --keep-alive 30"]
