@@ -22,7 +22,6 @@ logger = structlog.get_logger("onboarding_api")
 
 import os
 from server.sse_manager import sse_broadcast, subscribe_to_tenant
-from server.mock_fixtures import mock_onboarding_response
 
 def resolve_tenant_uuid(tenant_id: str) -> str:
     # Basic mock for now to satisfy imports
@@ -170,6 +169,7 @@ async def background_analyze_domain(url: str, job_id: str, tenant_id: str):
     logger.info("background_analyze_started", website=url, job_id=job_id)
     
     if os.getenv("DEVELOPMENT_MODE", "false").lower() == "true":
+        from server.mock_fixtures import mock_onboarding_response
         # Offline dev mode mock
         steps = ["reachable", "robots", "sitemap", "metadata", "opengraph", "schema", "pricing", "about", "blog", "contacts", "ai_summary", "business_brain", "icp"]
         for i, step in enumerate(steps):

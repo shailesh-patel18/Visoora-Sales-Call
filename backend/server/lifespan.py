@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from security.config import settings
 from server.worker import start_background_worker
-from utils.logger import log_info, log_warn, log_critical, log_error
+import structlog
+
+logger = structlog.get_logger("visoora_lifespan")
 
 # Note: We import rate_limiter and validation locally to avoid circular imports if necessary
 from server.services.rate_limiter import rate_limiter
@@ -16,21 +18,21 @@ def check_dev_env_production_safety():
         public_domain = os.getenv("SERVER_PUBLIC_DOMAIN", "").strip()
         port = os.getenv("PORT", "8000")
         if public_domain:
-            log_critical(
-                "dev_env_public_domain_mismatch",
-                "SECURITY WARNING: APP_ENV=development is set but SERVER_PUBLIC_DOMAIN is also configured."
+            logger.critical(
+                "SECURITY WARNING: APP_ENV=development is set but SERVER_PUBLIC_DOMAIN is also configured.",
+                event="dev_env_public_domain_mismatch"
             )
         else:
-            log_info("dev_env_localhost_only", f"APP_ENV=development confirmed.")
+            logger.info(f"APP_ENV=development confirmed.", event="dev_env_localhost_only")
 
 async def handle_graceful_shutdown():
-    log_info("graceful_shutdown", "SIGTERM/SIGINT received. Starting graceful shutdown...")
+    logger.info("SIGTERM/SIGINT received. Starting graceful shutdown...", event="graceful_shutdown")
     await asyncio.sleep(2)
     os._exit(0)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log_info("lifespan_start", "Initializing Visoora Backend Lifespan")
+    logger.info("Initializing Visoora Backend Lifespan", event="lifespan_start")
     
     # Initialize service status cache
     app.state.service_status = {
@@ -56,7 +58,7 @@ async def lifespan(app: FastAPI):
     try:
         await rate_limiter.connect()
     except Exception as e:
-        log_error("rate_limiter_fail", f"Rate limiter connection failed: {e}")
+        logger.error(f"Rate limiter connection failed: {e}", event="rate_limiter_fail")
         app.state.service_status["redis"] = "degraded"
         
     # Twilio Boot Time Validation
@@ -66,16 +68,16 @@ async def lifespan(app: FastAPI):
         app.state.service_status["twilio"] = "healthy"
         app.state.service_status["status"] = "healthy"
     except Exception as e:
-        log_error("twilio_validation_fail", f"Twilio boot time validation failed: {e}")
+        logger.error(f"Twilio boot time validation failed: {e}", event="twilio_validation_fail")
         app.state.service_status["twilio"] = "disabled"
         app.state.service_status["status"] = "degraded"
-        log_warn("voice_disabled", "Voice disabled. Application continuing to boot.")
+        logger.warning("Voice disabled. Application continuing to boot.", event="voice_disabled")
         
     # Start background worker
     try:
         await start_background_worker()
     except Exception as e:
-        log_error("background_worker_fail", f"Background worker failed to start: {e}")
+        logger.error(f"Background worker failed to start: {e}", event="background_worker_fail")
 
     # Register Graceful Shutdown
     try:
@@ -91,7 +93,7 @@ async def lifespan(app: FastAPI):
 
     app.state.startup_time_ms = int((time.time() - app.state.start_time) * 1000)
 
-    log_info("lifespan_ready", f"Visoora Backend Lifespan Startup Complete in {app.state.startup_time_ms}ms")
+    logger.info(f"Visoora Backend Lifespan Startup Complete in {app.state.startup_time_ms}ms", event="lifespan_ready")
     yield
     
-    log_info("lifespan_shutdown", "Visoora Backend Lifespan Shutdown")
+    logger.info("Visoora Backend Lifespan Shutdown", event="lifespan_shutdown")
